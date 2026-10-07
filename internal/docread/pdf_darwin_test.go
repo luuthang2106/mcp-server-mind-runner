@@ -4,11 +4,22 @@ package docread
 
 import (
 	"context"
+	"os/exec"
 	"strings"
 	"testing"
 
 	"mind-runner/internal/execx"
 )
+
+// noPdftotext: giả lập máy không cài poppler.
+type noPdftotext struct{ execx.Runner }
+
+func (r noPdftotext) Run(ctx context.Context, name string, args ...string) ([]byte, error) {
+	if name == "pdftotext" {
+		return nil, &exec.Error{Name: name, Err: exec.ErrNotFound}
+	}
+	return r.Runner.Run(ctx, name, args...)
+}
 
 // TestReadPDFKit: máy không có pdftotext vẫn đọc được PDF qua PDFKit (osascript).
 func TestReadPDFKit(t *testing.T) {

@@ -5,23 +5,12 @@ import (
 	"context"
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"mind-runner/internal/execx"
 )
-
-// noPdftotext: giả lập máy không cài poppler.
-type noPdftotext struct{ execx.Runner }
-
-func (r noPdftotext) Run(ctx context.Context, name string, args ...string) ([]byte, error) {
-	if name == "pdftotext" {
-		return nil, &exec.Error{Name: name, Err: exec.ErrNotFound}
-	}
-	return r.Runner.Run(ctx, name, args...)
-}
 
 type fakeRun struct {
 	out   string
