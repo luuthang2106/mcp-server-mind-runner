@@ -81,27 +81,48 @@ func RunMCP(args []string, stdout, stderr io.Writer, env func(string) string) in
 	// không đợi maintenance 3:30); ctx hủy khi server kết thúc.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go func() {
-		deps := worker.Deps{Store: st, Brain: br, Egress: eg, Config: &cfg,
-			Execx: execx.OS{}, DataDir: base}
-		for {
-			if _, err := sweepOnce(ctx, st, deps); err != nil {
-				lg.Error("sweep", "err", err.Error())
-			}
-			eg.FlushUsageIfDue()
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(5 * time.Minute):
-			}
-		}
-	}()
+	// Process không có key (vd Claude Desktop bật extension trước khi người
+	// dùng nhập key) không quét job: nếu quét nó claim job cloud rồi hoãn,
+	// làm chậm queue của process có key. Policy local thì vẫn quét.
+	if !canRunJobs(cfg) {
+		lg.Warn("mcp: không có API key gateway — bỏ qua chạy job nền (job chờ process có key)")
+	} else {
+		go sweepLoop(ctx, lg, st, eg, worker.Deps{Store: st, Brain: br, Egress: eg, Config: &cfg,
+			Execx: execx.OS{}, DataDir: base})
+	}
 
 	if err := server.New(br, st, md).Run(ctx, &mcp.StdioTransport{}); err != nil {
 		lg.Error("mcp: run", "err", err.Error())
 		return 1
 	}
 	return 0
+}
+
+// canRunJobs: có key cloud, hoặc có space dùng policy local (không cần key).
+func canRunJobs(cfg config.Config) bool {
+	if cfg.Gateway.APIKey != "" {
+		return true
+	}
+	for _, p := range cfg.Spaces.Policy {
+		if p == "local" {
+			return true
+		}
+	}
+	return false
+}
+
+func sweepLoop(ctx context.Context, lg *slog.Logger, st *store.Store, eg *egress.Egress, deps worker.Deps) {
+	for {
+		if _, err := sweepOnce(ctx, st, deps); err != nil {
+			lg.Error("sweep", "err", err.Error())
+		}
+		eg.FlushUsageIfDue()
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(5 * time.Minute):
+		}
+	}
 }
 
 // syncInstalledBinary: chạy từ .mcpb (Claude Desktop) → cập nhật bản cài
