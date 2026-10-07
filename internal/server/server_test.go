@@ -198,32 +198,11 @@ func TestRecallTool(t *testing.T) {
 	if err := remarshal(res.StructuredContent, &out); err != nil {
 		t.Fatalf("structured output: %v", err)
 	}
-	if len(out.Hits) != 1 || out.Hits[0].Space != "personal" || out.Hits[0].Text != "ghi chú alpha" {
+	if len(out.Hits) != 1 || out.Hits[0].Project != "" || out.Hits[0].Text != "ghi chú alpha" {
 		t.Fatalf("out=%+v", out)
 	}
 	if out.Stages["fts"] != "ok:1" {
 		t.Fatalf("stages=%v", out.Stages)
-	}
-
-	// space sai → isError liệt kê space hợp lệ
-	res, err = cs.CallTool(ctx, &mcp.CallToolParams{
-		Name:      "recall",
-		Arguments: map[string]any{"query": "alpha", "spaces": []string{"không-có"}},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !res.IsError {
-		t.Fatalf("space sai phải isError: %v", res)
-	}
-	var msg strings.Builder
-	for _, c := range res.Content {
-		if tc, ok := c.(*mcp.TextContent); ok {
-			msg.WriteString(tc.Text)
-		}
-	}
-	if !strings.Contains(msg.String(), "personal") {
-		t.Fatalf("lỗi phải liệt kê space hợp lệ: %v", res.Content)
 	}
 }
 
@@ -510,24 +489,6 @@ func TestIngestTool(t *testing.T) {
 	})
 	if err != nil || !res.IsError {
 		t.Fatalf("kind caption: res=%v err=%v", res, err)
-	}
-
-	// space sai → isError liệt kê hợp lệ
-	res, err = cs.CallTool(ctx, &mcp.CallToolParams{
-		Name:      "ingest",
-		Arguments: map[string]any{"path": path, "space": "không-có"},
-	})
-	if err != nil || !res.IsError {
-		t.Fatalf("space sai: res=%v err=%v", res, err)
-	}
-	var msg strings.Builder
-	for _, c := range res.Content {
-		if tc, ok := c.(*mcp.TextContent); ok {
-			msg.WriteString(tc.Text)
-		}
-	}
-	if !strings.Contains(msg.String(), "personal") {
-		t.Fatalf("lỗi phải liệt kê space hợp lệ: %v", res.Content)
 	}
 }
 
@@ -860,7 +821,7 @@ func TestPrompts(t *testing.T) {
 
 	// weekly-review: hướng dẫn recall + task_list; space truyền vào xuất hiện trong text
 	pr, err := cs.GetPrompt(ctx, &mcp.GetPromptParams{
-		Name: "weekly-review", Arguments: map[string]string{"space": "work"},
+		Name: "weekly-review", Arguments: map[string]string{"project": "work"},
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -138,3 +138,22 @@ func TestNoteMetaMergeAndSupersede(t *testing.T) {
 		t.Fatalf("khác space: err=%v", err)
 	}
 }
+
+// TestTaskDedupePerProject: cùng tiêu đề ở hai project là hai việc; cùng
+// project thì gộp.
+func TestTaskDedupePerProject(t *testing.T) {
+	st := openMigrated(t)
+	ctx := context.Background()
+	sp, _ := st.SpaceByName(ctx, "personal")
+	now := time.Now()
+	a, c1, _ := st.InsertTaskWith(ctx, sp, "Viết README", TaskFields{Project: "api"}, now)
+	b, c2, _ := st.InsertTaskWith(ctx, sp, "viết readme", TaskFields{Project: "web"}, now)
+	c, c3, _ := st.InsertTaskWith(ctx, sp, "Viết README.", TaskFields{Project: "api"}, now)
+	if !c1 || !c2 || c3 || a == b || c != a {
+		t.Fatalf("a=%d b=%d c=%d created=%v %v %v", a, b, c, c1, c2, c3)
+	}
+	ts, err := st.QueryTasks(ctx, sp, TaskQuery{Status: "open", Project: "web", Limit: 10})
+	if err != nil || len(ts) != 1 || ts[0].ID != b || ts[0].Project != "web" {
+		t.Fatalf("lọc project: %+v err=%v", ts, err)
+	}
+}

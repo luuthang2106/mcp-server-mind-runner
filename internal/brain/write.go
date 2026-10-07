@@ -21,7 +21,8 @@ type Brain struct {
 
 	mu          sync.Mutex // bảo vệ cache (handler MCP chạy song song)
 	cache       *vecCache
-	briefBudget int // 0 → defaultBriefingBudget
+	briefBudget int    // 0 → defaultBriefingBudget
+	project     string // project của tiến trình (MCP server theo cwd); "" = chung
 }
 
 func New(st *store.Store, eg *egress.Egress, cfg *config.Config) *Brain {
@@ -47,6 +48,9 @@ type WriteParams struct {
 	Source    string
 	SessionID *string
 	Meta      store.NoteMeta // trường có cấu trúc tuỳ kind (why/who/when/ref…); rỗng = không có
+	// Project: nhãn project; "" → project của Brain (SetProject). Dùng "-" để
+	// ép không gắn project (nạp tài liệu chung).
+	Project string
 }
 
 // WriteResult Fresh=false nghĩa là "ôn lại" (note đã tồn tại).
@@ -69,7 +73,7 @@ func (b *Brain) WriteNote(ctx context.Context, p WriteParams) (WriteResult, erro
 	id, fresh, err := b.st.UpsertNote(ctx, &store.Note{
 		SpaceID: p.SpaceID, Kind: p.Kind, Text: text, Tags: p.Tags,
 		Source: p.Source, SessionID: p.SessionID, CreatedAt: now, UpdatedAt: now,
-		Meta: p.Meta,
+		Meta: p.Meta, Project: b.projectFor(p.Project),
 	})
 	if err != nil {
 		return WriteResult{}, err

@@ -98,7 +98,8 @@ func (b *Brain) assembleBriefing(ctx context.Context, p BriefingParams) (string,
 		}
 	}
 
-	tasks, err := b.st.OpenTasks(ctx, p.SpaceID, 20)
+	// Việc của project đang mở lên đầu; hạn/đang chờ lấy từ mọi project.
+	tasks, err := b.st.QueryTasks(ctx, p.SpaceID, store.TaskQuery{Status: "open", Prefer: b.project, Limit: 20})
 	if err != nil {
 		return "", err
 	}
@@ -151,7 +152,7 @@ func (b *Brain) assembleBriefing(ctx context.Context, p BriefingParams) (string,
 				continue
 			}
 			seenTask[t.ID] = true
-			lines = append(lines, taskLine(t, today, p.Now))
+			lines = append(lines, taskLine(t, today, p.Now, b.project))
 		}
 		return lines
 	}
@@ -173,6 +174,7 @@ func (b *Brain) assembleBriefing(ctx context.Context, p BriefingParams) (string,
 			if n.Meta.Scope != "" {
 				line += " [" + n.Meta.Scope + "]"
 			}
+			line += projectTag(n.Project, b.project)
 			lines = append(lines, line)
 		}
 		return lines
@@ -191,7 +193,12 @@ func (b *Brain) assembleBriefing(ctx context.Context, p BriefingParams) (string,
 		seenRel[key] = true
 		relLines = append(relLines, fmt.Sprintf("- %s → %s (%s)", r.FromRef, r.ToRef, r.RelType))
 	}
+	capLines, err := b.capturedLines(ctx, p.SpaceID, p.Now)
+	if err != nil {
+		return "", err
+	}
 	sections := []section{
+		{"Đã ghi kể từ recap trước (sai thì sửa/xoá theo #id)", capLines},
 		{"Quá hạn / sắp đến hạn", dueLines},
 		{"Đang chờ người khác", waitLines},
 		{"Việc đang mở", openLines},
@@ -208,7 +215,14 @@ func (b *Brain) assembleBriefing(ctx context.Context, p BriefingParams) (string,
 	if budget <= 0 {
 		budget = defaultBriefingBudget
 	}
-	text := fmt.Sprintf("# Briefing — %s — %s\n\n", spaceName, p.Now.Format("2006-01-02"))
+	title := p.Now.Format("2006-01-02")
+	if b.project != "" {
+		title += " — project " + b.project
+	}
+	if spaceName != "" && spaceName != b.DefaultSpace() {
+		title += " — space " + spaceName
+	}
+	text := "# Briefing — " + title + "\n\n"
 	cut := 0
 	for _, sec := range sections {
 		header := "## " + sec.title + "\n"
@@ -246,7 +260,7 @@ func (b *Brain) DefaultSpace() string {
 const dueSoonDays = 3
 
 // taskLine render một task cho briefing: id, hạn, người, bước kế.
-func taskLine(t store.Task, today string, now time.Time) string {
+func taskLine(t store.Task, today string, now time.Time, cur string) string {
 	var tagsB []string
 	switch {
 	case t.DueAt != "" && t.DueAt < today:
@@ -259,7 +273,7 @@ func taskLine(t store.Task, today string, now time.Time) string {
 	if now.Sub(t.UpdatedAt) > StaleTaskAfter {
 		tagsB = append(tagsB, "stale")
 	}
-	line := fmt.Sprintf("- #%d (%s): %s", t.ID, strings.Join(tagsB, ", "), t.Title)
+	line := fmt.Sprintf("- #%d (%s): %s", t.ID, strings.Join(tagsB, ", "), t.Title) + projectTag(t.Project, cur)
 	if t.Owner != "" {
 		line += " — người làm: " + t.Owner
 	}
@@ -270,4 +284,127 @@ func taskLine(t store.Task, today string, now time.Time) string {
 		line += " — bước kế: " + *t.NextStep
 	}
 	return line
+}
+
+// capturedSources: note do agent/hook tự ghi (không gồm ingest/media mà người
+// dùng chủ động nạp) — đây là thứ cần người dùng liếc lại.
+var capturedSources = []string{"hook:stop", "tool:remember"}
+
+// capturedMax: số dòng tối đa của mục "Đã ghi kể từ recap trước".
+const capturedMax = 12
+
+// capturedWindow: [đầu ngày làm việc của lần briefing trước, đầu hôm nay).
+// Chưa từng briefing / briefing quá 7 ngày trước / đã briefing hôm nay (force)
+// → chỉ lấy ngày làm việc hôm qua.
+func (b *Brain) capturedWindow(ctx context.Context, spaceID int64, now time.Time) (time.Time, time.Time, error) {
+	dayStart := func(t time.Time) time.Time {
+		if b.cfg == nil {
+			return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
+		}
+		return b.cfg.DayStart(t)
+	}
+	to := dayStart(now)
+	from := to.AddDate(0, 0, -1)
+	last, ok, err := b.st.GetMeta(ctx, briefingKey(spaceID))
+	if err != nil {
+		return time.Time{}, time.Time{}, err
+	}
+	if ok {
+		if d, err := time.ParseInLocation("2006-01-02", last, now.Location()); err == nil {
+			ls := dayStart(d.Add(12 * time.Hour))
+			if ls.Before(to) && !ls.Before(to.AddDate(0, 0, -7)) {
+				from = ls
+			}
+		}
+	}
+	return from, to, nil
+}
+
+// capturedLines: note/việc được ghi tự động trong cửa sổ kể từ recap trước,
+// kèm #id để người dùng sửa nhanh ("mind fix: #12 …", "mind forget: #34").
+func (b *Brain) capturedLines(ctx context.Context, spaceID int64, now time.Time) ([]string, error) {
+	from, to, err := b.capturedWindow(ctx, spaceID, now)
+	if err != nil {
+		return nil, err
+	}
+	notes, err := b.st.NotesCreatedBetween(ctx, spaceID, from, to, capturedSources, 100)
+	if err != nil {
+		return nil, err
+	}
+	created, err := b.st.TasksCreatedBetween(ctx, spaceID, from, to, 100)
+	if err != nil {
+		return nil, err
+	}
+	closed, err := b.st.TasksClosedBetween(ctx, spaceID, from, to, 100)
+	if err != nil {
+		return nil, err
+	}
+	var lines []string
+	for _, t := range created {
+		st := "việc mới"
+		switch t.Status {
+		case "done":
+			st = "việc mới, đã xong"
+		case "dropped":
+			st = "việc mới, đã bỏ"
+		}
+		lines = append(lines, fmt.Sprintf("- task #%d (%s): %s", t.ID, st, clipText(t.Title, 120))+projectTag(t.Project, b.project))
+	}
+	for _, t := range closed {
+		st := "đã xong"
+		if t.Status == "dropped" {
+			st = "đã bỏ"
+		}
+		lines = append(lines, fmt.Sprintf("- task #%d (%s): %s", t.ID, st, clipText(t.Title, 120))+projectTag(t.Project, b.project))
+	}
+	for _, n := range notes {
+		line := fmt.Sprintf("- note #%d [%s]: %s", n.ID, n.Kind, clipText(n.Text, 120)) + projectTag(n.Project, b.project)
+		if n.Status == "superseded" && n.SupersededBy != nil {
+			line += fmt.Sprintf(" (đã bị #%d thay)", *n.SupersededBy)
+		}
+		lines = append(lines, line)
+	}
+	if len(lines) > capturedMax {
+		more := len(lines) - capturedMax
+		lines = append(lines[:capturedMax], fmt.Sprintf("- … và %d mục nữa (task_list / recall để xem)", more))
+	}
+	return lines, nil
+}
+
+// clipText cắt theo rune, thêm "…" khi dài hơn n.
+func clipText(s string, n int) string {
+	s = strings.Join(strings.Fields(s), " ")
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n]) + "…"
+}
+
+// SetProject đặt project của tiến trình (MCP server chạy với cwd = thư mục dự
+// án): note/task ghi qua tool được gắn nhãn này, recall ưu tiên nó, briefing
+// đưa việc của nó lên đầu. Rỗng = chung (Claude Desktop).
+func (b *Brain) SetProject(name string) { b.project = name }
+
+// Project: project của tiến trình ("" = chung).
+func (b *Brain) Project() string { return b.project }
+
+// projectFor: "" → project tiến trình; "-" → không gắn project.
+func (b *Brain) projectFor(p string) string {
+	switch p {
+	case "":
+		return b.project
+	case "-":
+		return ""
+	}
+	return p
+}
+
+// projectTag: " [project]" khi mục thuộc project khác project đang mở (mục của
+// project hiện tại hoặc mục chung không cần nhãn).
+func projectTag(p, cur string) string {
+	if p == "" || p == cur {
+		return ""
+	}
+	return " [" + p + "]"
 }

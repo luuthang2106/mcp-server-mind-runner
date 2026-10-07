@@ -18,6 +18,7 @@ import (
 	"mind-runner/internal/execx"
 	"mind-runner/internal/logging"
 	"mind-runner/internal/media"
+	"mind-runner/internal/project"
 	"mind-runner/internal/selfsync"
 	"mind-runner/internal/server"
 	"mind-runner/internal/store"
@@ -68,6 +69,12 @@ func RunMCP(args []string, stdout, stderr io.Writer, env func(string) string) in
 	defer eg.FlushUsage()
 	br := brain.New(st, eg, &cfg)
 	br.SetBriefingBudget(cfg.Briefing.TokenBudget)
+	// Claude Code chạy MCP server với cwd = thư mục dự án → nhãn project tự
+	// động (tên gốc git). Claude Desktop cwd "/" → không project.
+	if wd, err := os.Getwd(); err == nil {
+		br.SetProject(project.Of(wd))
+		lg.Info("mcp: project", "project", br.Project())
+	}
 	md := media.New(st, br, eg, &cfg, execx.OS{}, base)
 
 	// Sweep cơ hội: chạy ngay 1 lượt rồi lặp 5′ (embedding có trong ngày,

@@ -95,3 +95,41 @@ func Stop(ctx context.Context, st *store.Store, sess *store.Session, rawDays int
 	}
 	return &id, nil
 }
+
+// snapshotMax: file snapshot lớn hơn thế này là bất thường (client gửi nhầm
+// transcript đầy đủ) — bỏ qua thay vì gửi cả khối lên extract.
+const snapshotMax = 1 << 20
+
+// Snapshot chốt NGUYÊN file transcript tạm mà client ghi riêng cho mỗi lần
+// gọi hook (ZCode: một dòng JSONL — câu người dùng ở UserPromptSubmit, câu
+// trả lời ở Stop). Không có khái niệm offset: mỗi lần gọi là một lượt mới, nên
+// không đụng transcript_offset của session (expectOffset = -1).
+func Snapshot(ctx context.Context, st *store.Store, sessionID, path string, rawDays int, now time.Time) (*int64, error) {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	if fi.Size() == 0 || fi.Size() > snapshotMax {
+		return nil, nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	if len(bytes.TrimSpace(data)) == 0 {
+		return nil, nil
+	}
+	var buf bytes.Buffer
+	zw := gzip.NewWriter(&buf)
+	if _, err := zw.Write(data); err != nil {
+		return nil, err
+	}
+	if err := zw.Close(); err != nil {
+		return nil, err
+	}
+	id, err := st.AppendRaw(ctx, sessionID, buf.Bytes(), rawDays, now, now.Add(ExtractDebounce), -1, 0)
+	if err != nil {
+		return nil, err
+	}
+	return &id, nil
+}

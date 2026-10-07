@@ -14,6 +14,7 @@ type Session struct {
 	TranscriptPath   *string
 	TranscriptOffset int64
 	LastSeenAt       time.Time
+	Project          string // nhãn project theo cwd của phiên; "" = chung
 }
 
 // UpsertSessionStart tạo session mới hoặc cập nhật khi resume (cùng id).
@@ -42,7 +43,7 @@ func (s *Store) TouchSession(ctx context.Context, id string, now time.Time) erro
 // GetSession đọc session theo id.
 func (s *Store) GetSession(ctx context.Context, id string) (*Session, error) {
 	row := s.DB().QueryRowContext(ctx,
-		`SELECT id, client, space_id, transcript_path, transcript_offset, last_seen_at
+		`SELECT id, client, space_id, transcript_path, transcript_offset, last_seen_at, COALESCE(project,'')
 		 FROM sessions WHERE id=?`, id)
 	return scanSession(row)
 }
@@ -50,7 +51,7 @@ func (s *Store) GetSession(ctx context.Context, id string) (*Session, error) {
 // LatestSession trả session gần nhất của client trong space; chưa có → (nil, nil).
 func (s *Store) LatestSession(ctx context.Context, client string, spaceID int64) (*Session, error) {
 	row := s.DB().QueryRowContext(ctx,
-		`SELECT id, client, space_id, transcript_path, transcript_offset, last_seen_at
+		`SELECT id, client, space_id, transcript_path, transcript_offset, last_seen_at, COALESCE(project,'')
 		 FROM sessions WHERE client=? AND space_id=? ORDER BY last_seen_at DESC, id DESC LIMIT 1`,
 		client, spaceID)
 	sess, err := scanSession(row)
@@ -64,7 +65,7 @@ func scanSession(row *sql.Row) (*Session, error) {
 	var sess Session
 	var tp sql.NullString
 	var lastSeen string
-	if err := row.Scan(&sess.ID, &sess.Client, &sess.SpaceID, &tp, &sess.TranscriptOffset, &lastSeen); err != nil {
+	if err := row.Scan(&sess.ID, &sess.Client, &sess.SpaceID, &tp, &sess.TranscriptOffset, &lastSeen, &sess.Project); err != nil {
 		return nil, err
 	}
 	if tp.Valid {
@@ -77,5 +78,12 @@ func scanSession(row *sql.Row) (*Session, error) {
 // UpdateTranscriptOffset ghi vị trí đã đọc của transcript.
 func (s *Store) UpdateTranscriptOffset(ctx context.Context, id string, offset int64) error {
 	_, err := s.DB().ExecContext(ctx, `UPDATE sessions SET transcript_offset=? WHERE id=?`, offset, id)
+	return err
+}
+
+// SetSessionCWD ghi thư mục làm việc + project của phiên (rỗng → giữ cũ).
+func (s *Store) SetSessionCWD(ctx context.Context, id, cwd, project string) error {
+	_, err := s.DB().ExecContext(ctx, `UPDATE sessions SET cwd=COALESCE(?, cwd), project=COALESCE(?, project) WHERE id=?`,
+		nullStr(cwd), nullStr(project), id)
 	return err
 }

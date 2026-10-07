@@ -18,7 +18,7 @@ import (
 var migrateFS embed.FS
 
 // LatestSchema là version schema hiện hành (doctor so với giá trị này).
-const LatestSchema = 5
+const LatestSchema = 7
 
 type migration struct {
 	version int

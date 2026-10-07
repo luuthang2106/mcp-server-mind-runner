@@ -110,7 +110,8 @@ func (x *Extractor) RunSession(ctx context.Context, sessionID string) error {
 	}
 	// Việc đang mở của space đi kèm mỗi cửa sổ: model đóng/cập nhật đúng việc
 	// thay vì tạo việc trùng. Chỉ id trong danh sách này được phép cập nhật.
-	open, err := x.st.OpenTasks(ctx, sess.SpaceID, openTasksForExtract)
+	// Việc mở của project phiên này đứng trước để model đóng/cập nhật đúng việc.
+	open, err := x.st.QueryTasks(ctx, sess.SpaceID, store.TaskQuery{Status: "open", Prefer: sess.Project, Limit: openTasksForExtract})
 	if err != nil {
 		return err
 	}
@@ -163,7 +164,7 @@ func (x *Extractor) RunSession(ctx context.Context, sessionID string) error {
 		sid := sessionID
 		res, err := x.b.WriteNote(ctx, brain.WriteParams{
 			SpaceID: sess.SpaceID, Kind: n.Kind, Text: n.Text, Tags: n.Tags,
-			Source: "hook:stop", SessionID: &sid,
+			Source: "hook:stop", SessionID: &sid, Project: orNone(sess.Project),
 			Meta: store.NoteMeta{
 				Why: strings.TrimSpace(n.Why), Who: n.Who, When: strings.TrimSpace(n.When),
 				AsOf: strings.TrimSpace(n.AsOf), Ref: strings.TrimSpace(n.Ref),
@@ -185,6 +186,7 @@ func (x *Extractor) RunSession(ctx context.Context, sessionID string) error {
 		f := store.TaskFields{
 			NextStep: nonEmpty(tk.NextStep), Why: nonEmpty(tk.Why), Owner: nonEmpty(tk.Owner),
 			WaitingOn: nonEmpty(tk.WaitingOn), DueAt: nonEmpty(tk.Due), Constraints: nonEmpty(tk.Constraints),
+			Project: sess.Project,
 		}
 		if _, _, err := x.st.InsertTaskWith(ctx, sess.SpaceID, tk.Title, f, now); err != nil {
 			return fmt.Errorf("tasks[%d]: %w", i, err)
@@ -294,4 +296,12 @@ func shortErr(err error) string {
 		s = s[:200]
 	}
 	return s
+}
+
+// orNone: project rỗng của phiên → "-" để Brain không gắn project tiến trình.
+func orNone(p string) string {
+	if p == "" {
+		return "-"
+	}
+	return p
 }

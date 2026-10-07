@@ -32,6 +32,7 @@ type NoteFilter struct {
 	Tags              []string // AND — note phải mang đủ
 	Kinds             []string // OR — rỗng = mọi kind
 	IncludeSuperseded bool     // false = ẩn note status superseded
+	Project           string   // "" = mọi project; khác rỗng = chỉ note của project này
 }
 
 // Key: chuỗi tất định đại diện filter (khoá cache vector).
@@ -43,6 +44,9 @@ func (f NoteFilter) Key() string {
 	b.WriteString("|" + strings.Join(f.Tags, "\x00") + "|" + strings.Join(f.Kinds, ","))
 	if f.IncludeSuperseded {
 		b.WriteString("|all")
+	}
+	if f.Project != "" {
+		b.WriteString("|p=" + f.Project)
 	}
 	return b.String()
 }
@@ -65,6 +69,10 @@ func (f NoteFilter) sql() (string, []any) {
 		for _, k := range f.Kinds {
 			args = append(args, k)
 		}
+	}
+	if f.Project != "" {
+		q += ` AND n.project = ?`
+		args = append(args, f.Project)
 	}
 	for _, tag := range f.Tags {
 		q += ` AND EXISTS (SELECT 1 FROM json_each(n.tags) WHERE json_each.value = ?)`

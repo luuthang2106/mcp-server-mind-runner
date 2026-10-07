@@ -31,7 +31,7 @@ Recall before answering when the answer may depend on what they saved or did bef
 Use specific keywords and narrow with kinds (["document"] for files, ["decision"] for rationale). Cite source/when/ref. Empty result = not saved: say so, never fabricate. Not for general knowledge or code open in the repo.
 
 Ingest files only when the user asks (recordings with other people need their consent). Forget only on request, after confirming what will be removed.
-Omit space unless the user names one — the server picks the default.`
+Everything is one memory: the server labels what you save with the current project (git repo) automatically and ranks that project first in recall/task_list. Pass project only when the user asks about a specific other project.`
 
 // New tạo MCP server với tên/phiên bản lấy từ version.String().
 func New(b *brain.Brain, st *store.Store, md *media.Media) *mcp.Server {
@@ -41,9 +41,9 @@ func New(b *brain.Brain, st *store.Store, md *media.Media) *mcp.Server {
 	registerRemember(srv, b, st, def)
 	registerRecall(srv, b, st, def)
 	registerBriefing(srv, b, st, def)
-	registerTaskAdd(srv, st, def)
+	registerTaskAdd(srv, b, st, def)
 	registerTaskUpdate(srv, st)
-	registerTaskList(srv, st, def)
+	registerTaskList(srv, b, st, def)
 	registerIngest(srv, b, st, md, def)
 	registerExport(srv, b)
 	registerForget(srv, st)

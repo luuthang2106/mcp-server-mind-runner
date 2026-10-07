@@ -363,6 +363,9 @@ func TestRunSessionStructuredFields(t *testing.T) {
 	st := newStore(t)
 	ctx := context.Background()
 	rawID := seedSessionRaw(t, st, "s2", gzipBlob(t, ccUser("chốt sqlite")))
+	if err := st.SetSessionCWD(ctx, "s2", "/w/mind-runner", "mind-runner"); err != nil {
+		t.Fatal(err)
+	}
 	resp := `{"notes":[{"kind":"decision","text":"Chọn SQLite cho mind-runner","why":"chạy local, không cần server","alternatives":["Postgres"]}],
 	"tasks":[{"title":"Gửi báo giá","owner":"Lan","waiting_on":"anh Minh","due":"2026-10-10"},{"title":"Dọn backlog","due":"thứ sáu"}],"relations":[]}`
 	fake := egressfake.New(t, egressfake.Options{ChatResp: func(string, string) string { return resp }})
@@ -375,6 +378,9 @@ func TestRunSessionStructuredFields(t *testing.T) {
 	notes, err := st.NotesByKind(ctx, 1, "decision", time.Time{}, 10)
 	if err != nil || len(notes) != 1 {
 		t.Fatalf("notes=%+v err=%v", notes, err)
+	}
+	if notes[0].Project != "mind-runner" {
+		t.Fatalf("note phải mang project của phiên: %q", notes[0].Project)
 	}
 	m := notes[0].Meta
 	if m.Why != "chạy local, không cần server" || len(m.Alternatives) != 1 || m.Alternatives[0] != "Postgres" {
@@ -396,7 +402,7 @@ func TestRunSessionStructuredFields(t *testing.T) {
 		byTitle[tk.Title] = tk
 	}
 	q := byTitle["Gửi báo giá"]
-	if q.Owner != "Lan" || q.WaitingOn != "anh Minh" || q.DueAt != "2026-10-10" {
+	if q.Owner != "Lan" || q.WaitingOn != "anh Minh" || q.DueAt != "2026-10-10" || q.Project != "mind-runner" {
 		t.Fatalf("task=%+v", q)
 	}
 	if d := byTitle["Dọn backlog"]; d.DueAt != "" {

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -29,6 +30,8 @@ type Note struct {
 	// Status: active|superseded. SupersededBy: note thay thế (nếu có).
 	Status       string
 	SupersededBy *int64
+	// Project: nhãn tự động theo thư mục làm việc (tên gốc git); "" = chung.
+	Project string
 }
 
 // NoteMeta: trường có cấu trúc của note — mọi trường tuỳ chọn, chỉ điền khi
@@ -53,7 +56,7 @@ func (m NoteMeta) IsZero() bool {
 }
 
 // noteCols: cột SELECT chuẩn cho scanNote.
-const noteCols = `id, space_id, kind, text, tags, source, session_id, content_hash, created_at, updated_at, deleted_at, meta, status, superseded_by`
+const noteCols = `id, space_id, kind, text, tags, source, session_id, content_hash, created_at, updated_at, deleted_at, meta, status, superseded_by, project`
 
 func sha256hex(s string) string {
 	sum := sha256.Sum256([]byte(s))
@@ -90,16 +93,17 @@ func (s *Store) UpsertNote(ctx context.Context, n *Note) (int64, bool, error) {
 	// Ghi lại: meta merge (trường mới ghi đè, trường cũ giữ), tags hợp nhất
 	// không trùng, và note đã bị thay thế KHÔNG tự hồi sinh status.
 	err := s.DB().QueryRowContext(ctx,
-		`INSERT INTO notes(space_id,kind,text,tags,source,session_id,content_hash,created_at,updated_at,meta)
-		 VALUES(?,?,?,?,?,?,?,?,?,?)
+		`INSERT INTO notes(space_id,kind,text,tags,source,session_id,content_hash,created_at,updated_at,meta,project)
+		 VALUES(?,?,?,?,?,?,?,?,?,?,?)
 		 ON CONFLICT(space_id, content_hash)
 		 DO UPDATE SET updated_at=excluded.updated_at, deleted_at=NULL,
+		   project=COALESCE(notes.project, excluded.project),
 		   meta=json_patch(notes.meta, excluded.meta),
 		   tags=(SELECT json_group_array(value) FROM (
 		     SELECT value FROM json_each(notes.tags) UNION SELECT value FROM json_each(excluded.tags)))
 		 RETURNING id, created_at = updated_at`,
 		n.SpaceID, n.Kind, n.Text, tags, n.Source, sessionID, n.ContentHash,
-		ts(n.CreatedAt), ts(n.UpdatedAt), meta).Scan(&id, &fresh)
+		ts(n.CreatedAt), ts(n.UpdatedAt), meta, nullStr(n.Project)).Scan(&id, &fresh)
 	if err != nil {
 		return 0, false, err
 	}
@@ -123,11 +127,13 @@ func scanNote(sc rowScanner) (Note, error) {
 	var tags, createdAt, updatedAt, meta string
 	var sessionID, deletedAt sql.NullString
 	var supersededBy sql.NullInt64
+	var project sql.NullString
 	if err := sc.Scan(&n.ID, &n.SpaceID, &n.Kind, &n.Text, &tags, &n.Source,
 		&sessionID, &n.ContentHash, &createdAt, &updatedAt, &deletedAt,
-		&meta, &n.Status, &supersededBy); err != nil {
+		&meta, &n.Status, &supersededBy, &project); err != nil {
 		return Note{}, err
 	}
+	n.Project = project.String
 	if meta != "" && meta != "{}" {
 		// meta hỏng không làm hỏng cả note — bỏ qua trường.
 		_ = json.Unmarshal([]byte(meta), &n.Meta)
@@ -244,4 +250,69 @@ func (s *Store) SupersedeNote(ctx context.Context, oldID, newID int64, now time.
 	}
 	s.BumpGen()
 	return nil
+}
+
+// NotesCreatedBetween: note (chưa xoá, mọi status) tạo trong [from, to) của
+// space, chỉ các source trong sources (rỗng = mọi source); cũ trước.
+func (s *Store) NotesCreatedBetween(ctx context.Context, spaceID int64, from, to time.Time, sources []string, limit int) ([]Note, error) {
+	q := `SELECT ` + noteCols + ` FROM notes
+	      WHERE space_id=? AND deleted_at IS NULL AND created_at >= ? AND created_at < ?`
+	args := []any{spaceID, ts(from), ts(to)}
+	if len(sources) > 0 {
+		q += ` AND source IN (?` + strings.Repeat(", ?", len(sources)-1) + `)`
+		for _, src := range sources {
+			args = append(args, src)
+		}
+	}
+	q += ` ORDER BY created_at, id LIMIT ?`
+	args = append(args, limit)
+	rows, err := s.DB().QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Note
+	for rows.Next() {
+		n, err := scanNote(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, n)
+	}
+	return out, rows.Err()
+}
+
+// nullStr: "" → NULL.
+func nullStr(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
+// NoteProjects: project của các note (id không có → không có trong map).
+func (s *Store) NoteProjects(ctx context.Context, ids []int64) (map[int64]string, error) {
+	out := make(map[int64]string, len(ids))
+	if len(ids) == 0 {
+		return out, nil
+	}
+	ph := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		args[i] = id
+	}
+	rows, err := s.DB().QueryContext(ctx, `SELECT id, COALESCE(project,'') FROM notes WHERE id IN (`+ph+`)`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id int64
+		var p string
+		if err := rows.Scan(&id, &p); err != nil {
+			return nil, err
+		}
+		out[id] = p
+	}
+	return out, rows.Err()
 }

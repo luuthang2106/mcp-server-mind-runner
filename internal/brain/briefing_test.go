@@ -228,3 +228,67 @@ func TestBriefingGate(t *testing.T) {
 		t.Fatalf("meta=%q ok=%v err=%v", v, ok, err)
 	}
 }
+
+// TestBriefingCapturedSince: mục "Đã ghi kể từ recap trước" liệt kê note tự
+// ghi (hook/tool, không gồm ingest) + task mới/đóng trong cửa sổ, kèm #id.
+func TestBriefingCapturedSince(t *testing.T) {
+	st := newStore(t)
+	ctx := context.Background()
+	b := New(st, nil, testCfg())
+	spaceID, _ := st.SpaceByName(ctx, "personal")
+	day1 := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
+	if _, err := b.Briefing(ctx, BriefingParams{SpaceID: spaceID, Now: day1}); err != nil {
+		t.Fatal(err)
+	}
+	note := func(src, kind, text string, at time.Time) int64 {
+		t.Helper()
+		n := &store.Note{SpaceID: spaceID, Kind: kind, Text: text, Source: src, CreatedAt: at, UpdatedAt: at}
+		id, _, err := st.UpsertNote(ctx, n)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	at := day1.Add(3 * time.Hour)
+	auto := note("hook:stop", "decision", "Chốt dùng ngưỡng 0.92 cho chống trùng", at)
+	note("ingest:/tmp/a.md", "note", "Tài liệu nạp tay — không liệt kê", at)
+	oldTask, _, err := st.InsertTaskWith(ctx, spaceID, "Việc cũ", store.TaskFields{}, day1.AddDate(0, 0, -3))
+	if err != nil {
+		t.Fatal(err)
+	}
+	newTask, _, err := st.InsertTaskWith(ctx, spaceID, "Tạo MR MCLBO-1697", store.TaskFields{}, at)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := "done"
+	if _, err := st.UpdateTask(ctx, oldTask, &done, nil, at); err != nil {
+		t.Fatal(err)
+	}
+	// ngày sau, sau giờ đầu ngày → cửa sổ = [đầu ngày 5, đầu ngày 6)
+	res, err := b.Briefing(ctx, BriefingParams{SpaceID: spaceID, Now: day1.AddDate(0, 0, 1)})
+	if err != nil || !res.Delivered {
+		t.Fatalf("%+v err=%v", res, err)
+	}
+	for _, want := range []string{
+		"Đã ghi kể từ recap trước",
+		fmt.Sprintf("note #%d [decision]: Chốt dùng ngưỡng 0.92", auto),
+		fmt.Sprintf("task #%d (việc mới): Tạo MR MCLBO-1697", newTask),
+		fmt.Sprintf("task #%d (đã xong): Việc cũ", oldTask),
+	} {
+		if !strings.Contains(res.Text, want) {
+			t.Errorf("thiếu %q trong:\n%s", want, res.Text)
+		}
+	}
+	capSec := res.Text[strings.Index(res.Text, "## Đã ghi"):]
+	if i := strings.Index(capSec[3:], "\n## "); i >= 0 {
+		capSec = capSec[:i+3]
+	}
+	if strings.Contains(capSec, "Tài liệu nạp tay") {
+		t.Errorf("ingest không được liệt kê:\n%s", res.Text)
+	}
+	// force cùng ngày → vẫn chỉ ngày hôm qua, không rỗng
+	again, _ := b.Briefing(ctx, BriefingParams{SpaceID: spaceID, Now: day1.AddDate(0, 0, 1), Force: true})
+	if !strings.Contains(again.Text, "Tạo MR MCLBO-1697") {
+		t.Errorf("force:\n%s", again.Text)
+	}
+}

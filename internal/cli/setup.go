@@ -33,6 +33,8 @@ func RunSetup(args []string, stdout, stderr io.Writer, env func(string) string) 
 	var (
 		nonInteractive = fs.Bool("non-interactive", false, "")
 		claudeCode     = fs.Bool("claude-code", false, "")
+		qoder          = fs.Bool("qoder", false, "")
+		zcode          = fs.Bool("zcode", false, "")
 		dataDir        = fs.String("data-dir", "", "")
 		gatewayURL     = fs.String("gateway-url", "", "")
 		gatewayKey     = fs.String("gateway-key", "", "")
@@ -76,8 +78,17 @@ func RunSetup(args []string, stdout, stderr io.Writer, env func(string) string) 
 	if apiKey == "" {
 		apiKey = cfg.LegacyAPIKey()
 	}
-	if apiKey == "" && *claudeCode {
-		apiKey = existingClaudeMCPKey(filepath.Join(config.ExpandHome("~"), ".claude.json"))
+	home := config.ExpandHome("~")
+	qoderPath := filepath.Join(home, ".qoder", "settings.json")
+	zcodePath := filepath.Join(home, ".zcode", "cli", "config.json")
+	if apiKey == "" && (*claudeCode || *qoder || *zcode) {
+		apiKey = existingClaudeMCPKey(filepath.Join(home, ".claude.json"))
+		if apiKey == "" {
+			apiKey = existingKeyIn(qoderPath, "mcpServers")
+		}
+		if apiKey == "" {
+			apiKey = existingKeyIn(zcodePath, "mcp", "servers")
+		}
 	}
 
 	// Giá trị flag đè lên giá trị trong file.
@@ -215,6 +226,31 @@ func RunSetup(args []string, stdout, stderr io.Writer, env func(string) string) 
 		}
 	}
 
+	if *qoder || *zcode {
+		bin, err := os.Executable()
+		if err != nil {
+			fmt.Fprintln(stderr, "setup:", err)
+			return 1
+		}
+		if *qoder {
+			if err := SetupQoder(qoderPath, bin, apiKey); err != nil {
+				fmt.Fprintln(stdout, "warn: qoder:", err)
+			} else {
+				fmt.Fprintf(stdout, "qoder: đã ghi MCP server + hooks vào %s\n", qoderPath)
+			}
+		}
+		if *zcode {
+			if err := SetupZCode(zcodePath, bin, apiKey); err != nil {
+				fmt.Fprintln(stdout, "warn: zcode:", err)
+			} else {
+				fmt.Fprintf(stdout, "zcode: đã ghi MCP server + hooks (SessionStart/UserPromptSubmit/Stop) vào %s\n", zcodePath)
+			}
+		}
+		if apiKey == "" {
+			fmt.Fprintln(stdout, "warn: chưa có API key — thêm --gateway-key để server gọi được gateway")
+		}
+	}
+
 	switch {
 	case *skipLaunchd:
 		fmt.Fprintln(stdout, "launchd: bỏ qua (--skip-launchd)")
@@ -226,7 +262,6 @@ func RunSetup(args []string, stdout, stderr io.Writer, env func(string) string) 
 			fmt.Fprintln(stderr, "setup: launchd:", err)
 			return 1
 		}
-		home := config.ExpandHome("~")
 		if err := launchd.Install(context.Background(), runner, bin, home, filepath.Join(base, "logs")); err != nil {
 			fmt.Fprintln(stderr, "setup: launchd:", err)
 			return 1
@@ -236,7 +271,7 @@ func RunSetup(args []string, stdout, stderr io.Writer, env func(string) string) 
 
 	fmt.Fprintf(stdout, "xong. Data dir: %s\n", base)
 	fmt.Fprintln(stdout, "Tiếp theo: Claude Desktop → kéo file .mcpb (nhập API key trong hộp cấu hình);"+
-		" Claude Code → setup --claude-code.")
+		" Claude Code → setup --claude-code; Qoder → --qoder; ZCode → --zcode.")
 	fmt.Fprintln(stdout, "Client khác: thêm server stdio `mind-runner mcp` với env MIND_RUNNER_GATEWAY_API_KEY.")
 	fmt.Fprintln(stdout, "Hướng dẫn dùng tool được server gửi tự động (MCP instructions) — không cần dán custom instructions.")
 	fmt.Fprintln(stdout, "lưu ý: khi ghi âm có người khác, chỉ ingest khi họ đã đồng ý (consent).")

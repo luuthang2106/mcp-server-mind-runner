@@ -63,6 +63,20 @@ type ccBlock struct {
 	Input json.RawMessage `json:"input"`
 }
 
+// messageRole lấy message.role ("user"/"assistant"), rỗng nếu không có.
+func messageRole(raw json.RawMessage) string {
+	var m struct {
+		Role string `json:"role"`
+	}
+	if len(raw) == 0 || raw[0] != '{' || json.Unmarshal(raw, &m) != nil {
+		return ""
+	}
+	if m.Role == "user" || m.Role == "assistant" {
+		return m.Role
+	}
+	return ""
+}
+
 // condense rút transcript JSONL về hội thoại thật (xem đầu file).
 func condense(raw []byte) string {
 	var out strings.Builder
@@ -84,6 +98,10 @@ func condense(raw []byte) string {
 		}
 		if rec.IsSidechain {
 			continue // subagent: kết luận đã nằm trong câu trả lời của agent chính
+		}
+		if rec.Type == "" {
+			// bản ghi tối giản kiểu ZCode: {"message":{"role":"user","content":[…]}}
+			rec.Type = messageRole(rec.Message)
 		}
 		switch rec.Type {
 		case "user":

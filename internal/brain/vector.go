@@ -107,6 +107,9 @@ func (b *Brain) VectorTop(ctx context.Context, model string, f store.NoteFilter,
 		if len(kinds) > 0 && !kinds[r.Kind] {
 			continue
 		}
+		if f.Project != "" && r.Project != f.Project {
+			continue
+		}
 		hits = append(hits, VectorHit{ChunkID: r.ChunkID, NoteID: r.NoteID, Score: Cosine(q, r.Vec)})
 	}
 	sort.Slice(hits, func(i, j int) bool {

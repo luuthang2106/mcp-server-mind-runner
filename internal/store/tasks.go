@@ -20,6 +20,7 @@ type Task struct {
 	WaitingOn   string // đang chờ ai/cái gì
 	DueAt       string // hạn YYYY-MM-DD
 	Constraints string // ràng buộc / cách làm
+	Project     string // nhãn project tự động; "" = chung
 	UpdatedAt   time.Time
 }
 
@@ -27,6 +28,8 @@ type Task struct {
 // = xoá (NULL) khi update.
 type TaskFields struct {
 	NextStep, Why, Owner, WaitingOn, DueAt, Constraints *string
+	// Project: chỉ dùng khi tạo (InsertTaskWith) — không đổi project của task có sẵn.
+	Project string
 }
 
 // cols: cặp (cột, giá trị) theo thứ tự cố định cho các field khác nil.
@@ -53,7 +56,7 @@ func (f TaskFields) cols() ([]string, []any) {
 	return cs, vs
 }
 
-const taskCols = `id, space_id, title, status, next_step, why, owner, waiting_on, due_at, constraints, updated_at`
+const taskCols = `id, space_id, title, status, next_step, why, owner, waiting_on, due_at, constraints, updated_at, project`
 
 // InsertTask ghi task mới; đã có task open cùng space cùng title → không tạo
 // trùng, trả id cũ với created=false (chống lặp khi job extract retry).
@@ -72,7 +75,7 @@ func (s *Store) InsertTaskWith(ctx context.Context, spaceID int64, title string,
 		return 0, false, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	id, err := openTaskByNorm(ctx, tx, spaceID, title)
+	id, err := openTaskByNorm(ctx, tx, spaceID, f.Project, title)
 	switch {
 	case err == nil:
 		if len(cs) > 0 {
@@ -90,8 +93,8 @@ func (s *Store) InsertTaskWith(ctx context.Context, spaceID int64, title string,
 	default:
 		return 0, false, err
 	}
-	cols := append([]string{"space_id", "title", "status", "updated_at"}, cs...)
-	args := append([]any{spaceID, title, "open", ts(now)}, vs...)
+	cols := append([]string{"space_id", "title", "status", "updated_at", "created_at", "project"}, cs...)
+	args := append([]any{spaceID, title, "open", ts(now), ts(now), nullStr(f.Project)}, vs...)
 	res, err := tx.ExecContext(ctx, `INSERT INTO tasks(`+strings.Join(cols, ", ")+`) VALUES (?`+
 		strings.Repeat(", ?", len(cols)-1)+`)`, args...)
 	if err != nil {
@@ -193,12 +196,13 @@ type rowScanner interface{ Scan(dest ...any) error }
 
 func scanTask(sc rowScanner) (Task, error) {
 	var t Task
-	var nextStep, why, owner, waiting, due, cons sql.NullString
+	var nextStep, why, owner, waiting, due, cons, proj sql.NullString
 	var updatedAt string
 	if err := sc.Scan(&t.ID, &t.SpaceID, &t.Title, &t.Status, &nextStep,
-		&why, &owner, &waiting, &due, &cons, &updatedAt); err != nil {
+		&why, &owner, &waiting, &due, &cons, &updatedAt, &proj); err != nil {
 		return Task{}, err
 	}
+	t.Project = proj.String
 	if nextStep.Valid {
 		t.NextStep = &nextStep.String
 	}
@@ -225,9 +229,11 @@ func (s *Store) DropTask(ctx context.Context, id int64, now time.Time) (bool, er
 }
 
 // openTaskByNorm tìm task open của space có tiêu đề trùng sau NormTitle.
-func openTaskByNorm(ctx context.Context, tx *sql.Tx, spaceID int64, title string) (int64, error) {
+func openTaskByNorm(ctx context.Context, tx *sql.Tx, spaceID int64, project, title string) (int64, error) {
 	want := NormTitle(title)
-	rows, err := tx.QueryContext(ctx, `SELECT id, title FROM tasks WHERE space_id=? AND status='open' ORDER BY id`, spaceID)
+	// Cùng tiêu đề ở hai project khác nhau là hai việc khác nhau.
+	rows, err := tx.QueryContext(ctx, `SELECT id, title FROM tasks
+		WHERE space_id=? AND status='open' AND COALESCE(project,'')=? ORDER BY id`, spaceID, project)
 	if err != nil {
 		return 0, err
 	}
@@ -246,4 +252,53 @@ func openTaskByNorm(ctx context.Context, tx *sql.Tx, spaceID int64, title string
 		return 0, err
 	}
 	return 0, sql.ErrNoRows
+}
+
+// TasksCreatedBetween: task tạo trong [from, to) của space (mọi trạng thái),
+// cũ trước.
+func (s *Store) TasksCreatedBetween(ctx context.Context, spaceID int64, from, to time.Time, limit int) ([]Task, error) {
+	return s.queryTasks(ctx, `SELECT `+taskCols+` FROM tasks
+		WHERE space_id=? AND created_at >= ? AND created_at < ? ORDER BY created_at, id LIMIT ?`,
+		spaceID, ts(from), ts(to), limit)
+}
+
+// TasksClosedBetween: task đóng (done/dropped) có updated_at trong [from, to)
+// nhưng tạo trước from (task vừa tạo vừa đóng trong khoảng đã nằm ở
+// TasksCreatedBetween).
+func (s *Store) TasksClosedBetween(ctx context.Context, spaceID int64, from, to time.Time, limit int) ([]Task, error) {
+	return s.queryTasks(ctx, `SELECT `+taskCols+` FROM tasks
+		WHERE space_id=? AND status IN ('done','dropped') AND updated_at >= ? AND updated_at < ?
+		  AND (created_at IS NULL OR created_at < ?) ORDER BY updated_at, id LIMIT ?`,
+		spaceID, ts(from), ts(to), ts(from), limit)
+}
+
+// TaskQuery: lọc/sắp danh sách task.
+type TaskQuery struct {
+	Status  string // "" = mọi trạng thái
+	Project string // "" = mọi project; khác rỗng = chỉ project này
+	Prefer  string // project đưa lên đầu (không lọc); "" = không ưu tiên
+	Limit   int
+}
+
+// QueryTasks: task của space theo TaskQuery; project Prefer trước, rồi
+// updated_at DESC.
+func (s *Store) QueryTasks(ctx context.Context, spaceID int64, tq TaskQuery) ([]Task, error) {
+	q := `SELECT ` + taskCols + ` FROM tasks WHERE space_id=?`
+	args := []any{spaceID}
+	if tq.Status != "" {
+		q += ` AND status=?`
+		args = append(args, tq.Status)
+	}
+	if tq.Project != "" {
+		q += ` AND project=?`
+		args = append(args, tq.Project)
+	}
+	q += ` ORDER BY `
+	if tq.Prefer != "" {
+		q += `(COALESCE(project,'')=?) DESC, `
+		args = append(args, tq.Prefer)
+	}
+	q += `updated_at DESC LIMIT ?`
+	args = append(args, tq.Limit)
+	return s.queryTasks(ctx, q, args...)
 }

@@ -9,7 +9,7 @@ Tài liệu này viết để **dán nguyên văn cho agent Claude Code của b�
   embed (`/embeddings`), rerank (`/rerank`), chat cho extract (`/chat/completions`), omni (audio/ảnh/video — tuỳ chọn).
   Mặc định embed `text-embedding-v4`, rerank `qwen3-rerank`; đổi được trong config.
 - Claude Desktop và/hoặc Claude Code đã cài.
-- Tùy chọn: Ollama đang chạy nếu muốn space `work` dùng model local (policy `local`).
+- Tùy chọn: Ollama đang chạy nếu muốn một phần dữ liệu chỉ dùng model local (nâng cao: `[spaces.match]` + policy `local`).
 
 ## 1. Tải
 
@@ -62,6 +62,17 @@ ghi hooks `SessionStart/UserPromptSubmit/Stop/SessionEnd` vào `~/.claude/settin
 và chạy `claude mcp add-json -s user mind-runner '{"command":…,"env":{"MIND_RUNNER_GATEWAY_API_KEY":…}}'`.
 Chạy lại setup an toàn: hooks/MCP cũ được thay chứ không nhân đôi.
 
+Qoder / ZCode (cài MCP server kèm key + hooks vào config của app; dùng chung được với `--claude-code`):
+
+```bash
+~/mind-runner/mind-runner setup --qoder --zcode --non-interactive --gateway-key <key>
+```
+
+- Qoder: ghi `mcpServers.mind-runner` + hooks `SessionStart/UserPromptSubmit/Stop/SessionEnd` vào `~/.qoder/settings.json` (hook khác giữ nguyên).
+- ZCode: ghi `mcp.servers.mind-runner` + `hooks` (`enabled: true`, `SessionStart/UserPromptSubmit/Stop` — ZCode không có SessionEnd) vào `~/.zcode/cli/config.json`.
+  ZCode chỉ đưa cho hook lượt hiện tại (câu hỏi + câu trả lời, không kèm tool), nên hook chạy `--snapshot`; ghi chú tự động vẫn gom theo phiên như Claude Code.
+- Bỏ `--gateway-key` khi chạy lại: key đã có trong `~/.claude.json`/Qoder/ZCode được dùng lại. Mở lại app sau khi setup.
+
 Chỉ cấu hình chung (không đụng client): `~/mind-runner/mind-runner setup` (tương tác) hoặc `setup --non-interactive`.
 
 Config cũ còn `[gateway].api_key`? Chạy lại setup — dòng đó bị gỡ tự động (doctor sẽ cảnh báo tới khi gỡ).
@@ -80,7 +91,8 @@ Job cần cloud (embed/extract/omni) do MCP server xử lý (quét 5 phút/lần
 
 1. Claude Desktop: Settings → Extensions → kéo `mind-runner-<version>.mcpb` vào cửa sổ → nhập **Gateway URL** và **Gateway API key** (và tên model nếu chưa có `config.toml`) trong hộp cấu hình. Ô để trống = dùng giá trị trong `config.toml`.
 2. **Không cần dán custom instructions**: server gửi hướng dẫn dùng tool (gọi `briefing` đầu cuộc trò chuyện, `remember`, `recall`…) qua trường `instructions` của MCP — Claude Code, Claude Desktop và các agent hỗ trợ MCP instructions tự nạp.
-3. Agent/client khác (Cursor, Codex, …): thêm server stdio:
+3. Qoder, ZCode: `setup --qoder` / `setup --zcode` (mục 3).
+4. Agent/client khác (Cursor, Codex, …): thêm server stdio:
 
 ```json
 {"command": "/Users/<you>/mind-runner/mind-runner", "args": ["mcp"],
@@ -91,9 +103,10 @@ Job cần cloud (embed/extract/omni) do MCP server xử lý (quét 5 phút/lần
 
 ## Recap đầu ngày
 
-Briefing (việc đang mở, quyết định, sở thích, phiên gần đây) được chèn **1 lần mỗi ngày làm việc cho mỗi space**:
+Briefing (việc đang mở, quyết định, sở thích, phiên gần đây) được chèn **1 lần mỗi ngày làm việc** (việc của project đang mở lên đầu):
 
 - Claude Code: hook `SessionStart` khi mở phiên mới, **và** hook `UserPromptSubmit` cho prompt đầu tiên của ngày mới — nên phiên mở từ tối qua (gập máy, sáng mở lại) vẫn nhận recap ở câu hỏi đầu tiên sáng nay. Các prompt sau đó không tốn token.
+- Qoder, ZCode: giống Claude Code (sau `setup --qoder` / `--zcode`).
 - Client khác: model gọi tool `briefing` theo instructions; `delivered=false` nghĩa là hôm nay đã brief.
 - Ngày làm việc bắt đầu lúc `[briefing].day_start_hour` (mặc định `4` — làm khuya qua nửa đêm vẫn tính là hôm trước):
 

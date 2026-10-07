@@ -108,6 +108,7 @@ func placeholders(n int) string {
 type VecRow struct {
 	ChunkID, NoteID int64
 	Kind, Status    string // để lọc trong bộ nhớ mà không đổi khoá cache
+	Project         string
 	Vec             []float32
 }
 
@@ -115,7 +116,7 @@ type VecRow struct {
 // (cùng điều kiện với SearchFTS). ORDER BY c.id để tập kết quả tất định.
 func (s *Store) VectorsForSpaces(ctx context.Context, model string, f NoteFilter) ([]VecRow, error) {
 	cond, fargs := f.sql()
-	q := `SELECT e.chunk_id, c.note_id, n.kind, n.status, e.vec FROM embeddings e
+	q := `SELECT e.chunk_id, c.note_id, n.kind, n.status, COALESCE(n.project, ''), e.vec FROM embeddings e
 	      JOIN chunks c ON c.id = e.chunk_id
 	      JOIN notes n ON n.id = c.note_id
 	      WHERE e.model = ?` + cond
@@ -131,7 +132,7 @@ func (s *Store) VectorsForSpaces(ctx context.Context, model string, f NoteFilter
 	for rows.Next() {
 		var r VecRow
 		var blob []byte
-		if err := rows.Scan(&r.ChunkID, &r.NoteID, &r.Kind, &r.Status, &blob); err != nil {
+		if err := rows.Scan(&r.ChunkID, &r.NoteID, &r.Kind, &r.Status, &r.Project, &blob); err != nil {
 			return nil, err
 		}
 		r.Vec = decodeVec(blob)

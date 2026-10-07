@@ -48,6 +48,19 @@ Mỗi note giữ `text` là một câu tự nhiên; các trường phụ nằm t
 
 Task có thêm `why`, `owner`, `waiting_on`, `due` (YYYY-MM-DD), `constraints`; briefing có mục **Quá hạn / sắp đến hạn** (trong 3 ngày) và **Đang chờ người khác**. Extractor chạy nền cũng ghi các trường này.
 
+Đầu briefing có mục **Đã ghi kể từ recap trước**: note do hook/agent tự ghi (không gồm tài liệu nạp tay) + task mới/đã đóng kể từ lần recap trước (tối đa 7 ngày, 12 dòng), kèm `#id` — liếc qua, sai thì bảo agent sửa/xoá theo id.
+
+### Project tự động
+
+Không cần chia bộ nhớ. Mọi thứ nằm trong một kho, mỗi note/task/phiên tự mang nhãn `project` = tên thư mục gốc git của cwd (worktree → repo chính; không có git → tên thư mục; home hoặc `/` → không nhãn, ví dụ Claude Desktop). Hook và MCP server của Claude Code chạy với cwd = thư mục dự án nên nhãn có sẵn, không cấu hình gì.
+
+- **recall** tìm khắp nơi, nhưng note cùng project đang mở được đẩy lên trước khi điểm ngang nhau (không lọc mất kết quả). Tham số `project` chỉ dùng khi hỏi rõ về một project khác.
+- **task_list** liệt kê mọi việc, project hiện tại lên đầu, mỗi việc có `project`; `project` để lọc, `status: all` để xem cả việc đã xong/bỏ.
+- **briefing** (một lần mỗi ngày): việc của project đang mở lên đầu; quá hạn/đang chờ lấy từ mọi project; mục thuộc project khác ghi `[tên-project]`.
+- Chống trùng task chỉ trong cùng project: "Viết README" ở hai repo là hai việc.
+
+`[spaces]` vẫn còn cho người cần tách policy cloud/local (ví dụ một thư mục chỉ được dùng model local qua `[spaces.match]`), nhưng mặc định mọi thứ ở `personal` và tool không nhận tham số space.
+
 Recall mặc định trả 5 kết quả, bỏ hit có điểm rerank dưới 0.2 và ẩn note đã superseded; lọc được theo `kinds`. Chỉnh trong config:
 
 ```toml
@@ -55,6 +68,15 @@ Recall mặc định trả 5 kết quả, bỏ hit có điểm rerank dưới 0.
 limit = 5        # 1..50
 min_score = 0.2  # 0 = tắt ngưỡng; chỉ áp dụng khi rerank chạy được
 ```
+
+### Client được hỗ trợ
+
+| Client | Cài | Capture tự động |
+|---|---|---|
+| Claude Code | `setup --claude-code` | transcript JSONL đọc theo offset (Stop/SessionEnd) |
+| Qoder | `setup --qoder` | như Claude Code (cùng định dạng), nhãn client `qoder` |
+| ZCode | `setup --zcode` | hook `--snapshot`: mỗi UserPromptSubmit/Stop chốt lượt hiện tại (ZCode chỉ đưa câu hỏi/câu trả lời, không có tool, không có SessionEnd) |
+| Claude Desktop | kéo `.mcpb` | không có hook — chỉ tool `remember`/`recall`… |
 
 ### Restore từ backup
 

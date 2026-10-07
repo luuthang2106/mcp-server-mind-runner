@@ -40,7 +40,6 @@ type RememberIn struct {
 	Supersedes   int64    `json:"supersedes,omitempty" jsonschema:"note_id of an earlier decision/fact this one replaces (from recall); the old one is hidden from recall but kept as history"`
 	// preference
 	Scope string `json:"scope,omitempty" jsonschema:"Preference only: where it applies, e.g. 'code reviews', 'emails to clients'"`
-	Space string `json:"space,omitempty" jsonschema:"Space name. Omit unless the user explicitly names one — the server routes to the default space."`
 }
 
 // RememberOut — kết quả ghi: created=false nghĩa là nội dung đã có (ghi lặp = ôn lại).
@@ -74,11 +73,7 @@ func registerRemember(srv *mcp.Server, b *brain.Brain, st *store.Store, defSpace
 				return nil, RememberOut{}, err
 			}
 		}
-		space := in.Space
-		if space == "" {
-			space = defSpace
-		}
-		spaceID, err := st.SpaceByName(ctx, space)
+		spaceID, err := st.SpaceByName(ctx, defSpace)
 		if err != nil {
 			return nil, RememberOut{}, err
 		}
@@ -128,7 +123,7 @@ type RecallIn struct {
 	Query             string   `json:"query" jsonschema:"Specific keywords: names, project, document title, topic. Vietnamese without diacritics also matches."`
 	Kinds             []string `json:"kinds,omitempty" jsonschema:"Restrict to kinds: decision, fact, preference, note, task_hint, document (ingested files), transcript (audio/video), caption (images). Omit to search everything."`
 	Tags              []string `json:"tags,omitempty" jsonschema:"Only notes carrying all these tags (ingested files are tagged file:<name>)"`
-	Spaces            []string `json:"spaces,omitempty" jsonschema:"Only these spaces; omit = all"`
+	Project           string   `json:"project,omitempty" jsonschema:"Only this project (git repo name). Omit — results from the current project are already ranked first; set only when the user asks about a specific other project."`
 	IncludeSuperseded bool     `json:"include_superseded,omitempty" jsonschema:"Also return decisions/facts that were replaced (for 'what did we decide before?' history questions)"`
 	Limit             int      `json:"limit,omitempty" jsonschema:"Max results (default 5)"`
 }
@@ -139,7 +134,7 @@ type HitOut struct {
 	NoteID       int64    `json:"note_id"`
 	Text         string   `json:"text"`
 	Kind         string   `json:"kind"`
-	Space        string   `json:"space"`
+	Project      string   `json:"project,omitempty"`
 	Source       string   `json:"source"`
 	Title        string   `json:"title,omitempty"`
 	Why          string   `json:"why,omitempty"`
@@ -176,14 +171,6 @@ func registerRecall(srv *mcp.Server, b *brain.Brain, st *store.Store, defSpace s
 			"Check stages for degraded layers (\"error: …\").",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in RecallIn) (*mcp.CallToolResult, RecallOut, error) {
-		var spaceIDs []int64
-		for _, name := range in.Spaces {
-			id, err := st.SpaceIDOrList(ctx, name)
-			if err != nil {
-				return nil, RecallOut{}, err
-			}
-			spaceIDs = append(spaceIDs, id)
-		}
 		var kinds []string
 		for _, k := range in.Kinds {
 			k = strings.ToLower(strings.TrimSpace(k))
@@ -194,7 +181,7 @@ func registerRecall(srv *mcp.Server, b *brain.Brain, st *store.Store, defSpace s
 		}
 		res, err := b.Recall(ctx, brain.RecallParams{
 			Query:             in.Query,
-			SpaceIDs:          spaceIDs,
+			Project:           strings.TrimSpace(in.Project),
 			Tags:              normTags(in.Tags),
 			Kinds:             kinds,
 			IncludeSuperseded: in.IncludeSuperseded,
@@ -210,7 +197,7 @@ func registerRecall(srv *mcp.Server, b *brain.Brain, st *store.Store, defSpace s
 				NoteID:       h.NoteID,
 				Text:         h.Text,
 				Kind:         h.Kind,
-				Space:        h.Space,
+				Project:      h.Project,
 				Source:       h.Source,
 				Title:        h.Meta.Title,
 				Why:          h.Meta.Why,
@@ -250,7 +237,6 @@ type TaskAddIn struct {
 	Due         string `json:"due,omitempty" jsonschema:"Deadline YYYY-MM-DD (resolve 'Friday', 'next week' against today's date)"`
 	Constraints string `json:"constraints,omitempty" jsonschema:"How: constraints, acceptance criteria, approach"`
 	NextStep    string `json:"next_step,omitempty" jsonschema:"The very next concrete action, if known"`
-	Space       string `json:"space,omitempty" jsonschema:"Space name. Omit unless the user explicitly names one — the server routes to the default space."`
 }
 
 // TaskAddOut — task_id vừa tạo (hoặc task open trùng title đã có).
@@ -259,14 +245,14 @@ type TaskAddOut struct {
 	Created bool  `json:"created"`
 }
 
-func registerTaskAdd(srv *mcp.Server, st *store.Store, defSpace string) {
+func registerTaskAdd(srv *mcp.Server, b *brain.Brain, st *store.Store, defSpace string) {
 	mcp.AddTool(srv, &mcp.Tool{
 		Name: "task_add",
 		Description: "Track a concrete open loop: something the user (or someone they wait on) still has to do. " +
 			"Call it proactively when the user commits to, is assigned, or leaves unfinished a specific action. " +
 			"Capture due date, owner/waiting_on, why and next_step only when stated. " +
 			"Do NOT use for vague wishes (remember kind=task_hint) or steps you are about to do yourself in this session. " +
-			"An open task with the same title in the same space is reused and its empty fields filled (created=false).",
+			"An open task with the same title in the same project is reused and its empty fields filled (created=false).",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in TaskAddIn) (*mcp.CallToolResult, TaskAddOut, error) {
 		title := strings.TrimSpace(in.Title)
 		if title == "" {
@@ -275,17 +261,14 @@ func registerTaskAdd(srv *mcp.Server, st *store.Store, defSpace string) {
 		if err := checkDate(in.Due); err != nil {
 			return nil, TaskAddOut{}, err
 		}
-		space := in.Space
-		if space == "" {
-			space = defSpace
-		}
-		spaceID, err := st.SpaceByName(ctx, space)
+		spaceID, err := st.SpaceByName(ctx, defSpace)
 		if err != nil {
 			return nil, TaskAddOut{}, err
 		}
 		id, created, err := st.InsertTaskWith(ctx, spaceID, title, store.TaskFields{
 			NextStep: optStr(in.NextStep), Why: optStr(in.Why), Owner: optStr(in.Owner),
 			WaitingOn: optStr(in.WaitingOn), DueAt: optStr(in.Due), Constraints: optStr(in.Constraints),
+			Project: b.Project(),
 		}, time.Now())
 		if err != nil {
 			return nil, TaskAddOut{}, err
@@ -352,9 +335,9 @@ func registerTaskUpdate(srv *mcp.Server, st *store.Store) {
 
 // TaskListIn — tham số tool task_list.
 type TaskListIn struct {
-	Status string `json:"status,omitempty" jsonschema:"open (default) | done | dropped"`
-	Space  string `json:"space,omitempty" jsonschema:"Space name. Omit unless the user explicitly names one — the server routes to the default space."`
-	Limit  int    `json:"limit,omitempty" jsonschema:"Max tasks (default 20)"`
+	Status  string `json:"status,omitempty" jsonschema:"open (default) | done | dropped"`
+	Project string `json:"project,omitempty" jsonschema:"Only this project (git repo name). Omit to list everything — the current project comes first."`
+	Limit   int    `json:"limit,omitempty" jsonschema:"Max tasks (default 20)"`
 }
 
 // TaskItem một dòng task cho client; stale = open quá 14 ngày không đụng.
@@ -369,6 +352,7 @@ type TaskItem struct {
 	Due         string `json:"due,omitempty"`
 	Overdue     bool   `json:"overdue,omitempty"`
 	Constraints string `json:"constraints,omitempty"`
+	Project     string `json:"project,omitempty"`
 	Stale       bool   `json:"stale"`
 	UpdatedAt   string `json:"updated_at"`
 }
@@ -378,7 +362,7 @@ type TaskListOut struct {
 	Tasks []TaskItem `json:"tasks"`
 }
 
-func registerTaskList(srv *mcp.Server, st *store.Store, defSpace string) {
+func registerTaskList(srv *mcp.Server, b *brain.Brain, st *store.Store, defSpace string) {
 	mcp.AddTool(srv, &mcp.Tool{
 		Name: "task_list",
 		Description: "List the user's tracked tasks with due dates, owners and blockers. " +
@@ -386,11 +370,7 @@ func registerTaskList(srv *mcp.Server, st *store.Store, defSpace string) {
 			"stale=true means untouched for 14+ days — ask whether it is still relevant.",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in TaskListIn) (*mcp.CallToolResult, TaskListOut, error) {
-		space := in.Space
-		if space == "" {
-			space = defSpace
-		}
-		spaceID, err := st.SpaceByName(ctx, space)
+		spaceID, err := st.SpaceByName(ctx, defSpace)
 		if err != nil {
 			return nil, TaskListOut{}, err
 		}
@@ -402,7 +382,11 @@ func registerTaskList(srv *mcp.Server, st *store.Store, defSpace string) {
 		if limit <= 0 {
 			limit = 20
 		}
-		tasks, err := st.ListTasks(ctx, spaceID, status, limit)
+		if status == "all" {
+			status = ""
+		}
+		tasks, err := st.QueryTasks(ctx, spaceID, store.TaskQuery{
+			Status: status, Project: strings.TrimSpace(in.Project), Prefer: b.Project(), Limit: limit})
 		if err != nil {
 			return nil, TaskListOut{}, err
 		}
@@ -413,6 +397,7 @@ func registerTaskList(srv *mcp.Server, st *store.Store, defSpace string) {
 			item := TaskItem{
 				ID: t.ID, Title: t.Title, Status: t.Status,
 				Why: t.Why, Owner: t.Owner, WaitingOn: t.WaitingOn, Due: t.DueAt, Constraints: t.Constraints,
+				Project:   t.Project,
 				Overdue:   t.Status == "open" && t.DueAt != "" && t.DueAt < today,
 				Stale:     t.Status == "open" && now.Sub(t.UpdatedAt) > brain.StaleTaskAfter,
 				UpdatedAt: t.UpdatedAt.UTC().Format(time.RFC3339),
@@ -513,7 +498,6 @@ type IngestIn struct {
 	Title   string   `json:"title,omitempty" jsonschema:"Human title of the document (default: file name)"`
 	Summary string   `json:"summary,omitempty" jsonschema:"Optional 1-2 sentence summary, only if you have read the file"`
 	Kind    string   `json:"kind,omitempty" jsonschema:"Text files only: document (default) | note | fact | preference | decision | task_hint"`
-	Space   string   `json:"space,omitempty" jsonschema:"Space name. Omit unless the user explicitly names one — the server routes to the default space."`
 }
 
 // IngestOut — text: note_id + created=false khi nội dung đã có; media:
@@ -534,11 +518,7 @@ func registerIngest(srv *mcp.Server, b *brain.Brain, st *store.Store, md *media.
 			"Idempotent (text by content, media by file sha256). Media returns immediately; transcription/captioning runs in the background.",
 		Annotations: &mcp.ToolAnnotations{IdempotentHint: true},
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in IngestIn) (*mcp.CallToolResult, IngestOut, error) {
-		space := in.Space
-		if space == "" {
-			space = defSpace
-		}
-		spaceID, err := st.SpaceIDOrList(ctx, space)
+		spaceID, err := st.SpaceIDOrList(ctx, defSpace)
 		if err != nil {
 			return nil, IngestOut{}, err
 		}
@@ -569,8 +549,7 @@ var nowFunc = time.Now
 
 // BriefingIn — tham số tool briefing.
 type BriefingIn struct {
-	Space string `json:"space,omitempty" jsonschema:"Space name. Omit unless the user explicitly names one — the server routes to the default space."`
-	Force bool   `json:"force,omitempty" jsonschema:"Bypass the once-per-day gate — only when the user explicitly asks for a recap"`
+	Force bool `json:"force,omitempty" jsonschema:"Bypass the once-per-day gate — only when the user explicitly asks for a recap"`
 }
 
 // BriefingOut — delivered=false kèm reason khi gate chặn (hôm nay đã briefing).
@@ -584,14 +563,10 @@ func registerBriefing(srv *mcp.Server, b *brain.Brain, st *store.Store, defSpace
 	mcp.AddTool(srv, &mcp.Tool{
 		Name: "briefing",
 		Description: "Load the user's context at the start of a conversation: overdue/due tasks, blocked tasks, open tasks, recent decisions and preferences, recent sessions. " +
-			"Call once at the beginning of a conversation. Gated to once per day per space (day starts at [briefing].day_start_hour, default 04:00): " +
+			"Call once at the beginning of a conversation. Gated to once per day (day starts at [briefing].day_start_hour, default 04:00): " +
 			"delivered=false means today's recap was already given (possibly injected by a hook) — do not retry. Use force=true only when the user asks for a recap.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in BriefingIn) (*mcp.CallToolResult, BriefingOut, error) {
-		space := in.Space
-		if space == "" {
-			space = defSpace
-		}
-		spaceID, err := st.SpaceByName(ctx, space)
+		spaceID, err := st.SpaceByName(ctx, defSpace)
 		if err != nil {
 			return nil, BriefingOut{}, err
 		}

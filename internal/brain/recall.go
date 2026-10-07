@@ -16,6 +16,11 @@ const (
 	ftsN    = 50 // số chunk FTS lấy trước khi gom về note
 	vecN    = 50 // số chunk vector lấy trước khi gom về note
 	rerankM = 20 // số note tối đa đưa vào rerank
+
+	// Ưu tiên project đang làm: cộng vào điểm rerank (0..1) / nhân điểm RRF.
+	// Đủ để vượt note ngang điểm của project khác, không đủ để kéo note lạc đề lên.
+	projectBoostRerank = 0.08
+	projectBoostRRF    = 1.3
 )
 
 // RecallParams tham số tìm kiếm hybrid.
@@ -28,6 +33,11 @@ type RecallParams struct {
 	Limit             int      // 0 → [recall].limit (mặc định 5)
 	// MinScore: nil → [recall].min_score; 0 = tắt ngưỡng.
 	MinScore *float64
+	// Project: lọc cứng (chỉ khi người dùng hỏi rõ một project); "" = mọi project.
+	Project string
+	// Prefer: project đang làm — note cùng project được đẩy lên (không lọc).
+	// "" → project của Brain (SetProject).
+	Prefer string
 }
 
 // RecallHit một kết quả đã hợp nhất về note.
@@ -41,6 +51,7 @@ type RecallHit struct {
 	Meta                store.NoteMeta // why/who/when/ref… để trích dẫn và đánh giá liên quan
 	Status              string         // active|superseded
 	SupersededBy        *int64
+	Project             string  // "" = chung
 	Text                string  // text của chunk khớp tốt nhất
 	Score               float64 // RRF, hoặc rerank score nếu rerank chạy
 }
@@ -137,7 +148,7 @@ func (b *Brain) Recall(ctx context.Context, p RecallParams) (RecallResult, error
 		stages["fts"] = "skipped: empty query tokens"
 	} else {
 		hits, err := b.st.SearchFTS(ctx, p.Query, store.NoteFilter{
-			SpaceIDs: allIDs, Tags: p.Tags, Kinds: p.Kinds, IncludeSuperseded: p.IncludeSuperseded}, ftsN)
+			SpaceIDs: allIDs, Tags: p.Tags, Kinds: p.Kinds, IncludeSuperseded: p.IncludeSuperseded, Project: p.Project}, ftsN)
 		if err != nil {
 			return RecallResult{}, err
 		}
@@ -174,7 +185,7 @@ func (b *Brain) Recall(ctx context.Context, p RecallParams) (RecallResult, error
 			continue
 		}
 		hits, err := b.VectorTop(ctx, model, store.NoteFilter{
-			SpaceIDs: g.spaceIDs, Tags: p.Tags, Kinds: p.Kinds, IncludeSuperseded: p.IncludeSuperseded}, qv[0], vecN)
+			SpaceIDs: g.spaceIDs, Tags: p.Tags, Kinds: p.Kinds, IncludeSuperseded: p.IncludeSuperseded, Project: p.Project}, qv[0], vecN)
 		if err != nil {
 			return RecallResult{}, err
 		}
@@ -252,7 +263,38 @@ func (b *Brain) Recall(ctx context.Context, p RecallParams) (RecallResult, error
 			cands[i].text = texts[cands[i].chunkID]
 		}
 	}
+	prefer := p.Prefer
+	if prefer == "" {
+		prefer = b.project
+	}
+	var sameProj map[int64]bool
+	if prefer != "" && len(cands) > 0 {
+		noteIDs := make([]int64, len(cands))
+		for i, c := range cands {
+			noteIDs[i] = c.ID
+		}
+		projs, err := b.st.NoteProjects(ctx, noteIDs)
+		if err != nil {
+			return RecallResult{}, err
+		}
+		sameProj = make(map[int64]bool, len(projs))
+		for id, pr := range projs {
+			sameProj[id] = pr == prefer
+		}
+	}
+	// boosted: điểm dùng để XẾP — cùng project được cộng thêm, điểm báo ra
+	// (và ngưỡng min_score) vẫn là điểm gốc để không méo hiệu chuẩn.
+	boosted := func(id int64, score float64, reranked bool) float64 {
+		if !sameProj[id] {
+			return score
+		}
+		if reranked {
+			return score + projectBoostRerank
+		}
+		return score * projectBoostRRF
+	}
 
+	reranked := false
 	// (4) Rerank — chỉ chạy khi mọi space cùng policy (docs đi một endpoint,
 	// không trộn nguồn); lỗi/model rỗng → giữ thứ tự RRF (hiện ở Stages).
 	if len(cands) == 0 {
@@ -273,30 +315,34 @@ func (b *Brain) Recall(ctx context.Context, p RecallParams) (RecallResult, error
 			for i := range cands {
 				cands[i].score = scores[i]
 			}
+			// Ngưỡng chỉ áp trên điểm rerank (đã hiệu chuẩn 0..1): bỏ kết quả
+			// không liên quan thay vì luôn trả đủ limit → ít token nhiễu.
+			kept := cands[:0]
+			for _, c := range cands {
+				if minScore <= 0 || c.score >= minScore {
+					kept = append(kept, c)
+				}
+			}
+			if dropped := len(cands) - len(kept); dropped > 0 {
+				stages["rerank"] = fmt.Sprintf("ok:%d (bỏ %d dưới ngưỡng %.2f)", len(kept), dropped, minScore)
+			} else {
+				stages["rerank"] = fmt.Sprintf("ok:%d", len(kept))
+			}
+			cands = kept
 			sort.SliceStable(cands, func(i, j int) bool {
-				if cands[i].score != cands[j].score {
-					return cands[i].score > cands[j].score
+				si, sj := boosted(cands[i].ID, cands[i].score, true), boosted(cands[j].ID, cands[j].score, true)
+				if si != sj {
+					return si > sj
 				}
 				return cands[i].chunkID < cands[j].chunkID
 			})
-			// Ngưỡng chỉ áp trên điểm rerank (đã hiệu chuẩn 0..1): bỏ kết quả
-			// không liên quan thay vì luôn trả đủ limit → ít token nhiễu.
-			kept := len(cands)
-			if minScore > 0 {
-				for i, c := range cands {
-					if c.score < minScore {
-						kept = i
-						break
-					}
-				}
-			}
-			if kept < len(cands) {
-				stages["rerank"] = fmt.Sprintf("ok:%d (bỏ %d dưới ngưỡng %.2f)", kept, len(cands)-kept, minScore)
-				cands = cands[:kept]
-			} else {
-				stages["rerank"] = fmt.Sprintf("ok:%d", len(cands))
-			}
+			reranked = true
 		}
+	}
+	if !reranked && sameProj != nil {
+		sort.SliceStable(cands, func(i, j int) bool {
+			return boosted(cands[i].ID, cands[i].score, false) > boosted(cands[j].ID, cands[j].score, false)
+		})
 	}
 	if len(cands) > limit {
 		cands = cands[:limit]
@@ -333,6 +379,7 @@ func (b *Brain) Recall(ctx context.Context, p RecallParams) (RecallResult, error
 			Meta:         n.Meta,
 			Status:       n.Status,
 			SupersededBy: n.SupersededBy,
+			Project:      n.Project,
 			Text:         c.text,
 			Score:        c.score,
 		})

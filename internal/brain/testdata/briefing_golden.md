@@ -1,4 +1,4 @@
-# Briefing — personal — 2026-10-06
+# Briefing — 2026-10-06
 
 ## Việc đang mở
 - #1 (cập nhật 2026-10-05): Chuẩn bị demo mind-runner
