@@ -5,11 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"sync"
 	"time"
 
 	"mind-runner/internal/config"
 	"mind-runner/internal/egress"
+	"mind-runner/internal/execx"
 	"mind-runner/internal/store"
 )
 
@@ -19,11 +19,14 @@ type Brain struct {
 	eg  *egress.Egress
 	cfg *config.Config // nguồn chân lý policy của space ([spaces.policy])
 
-	mu          sync.Mutex // bảo vệ cache (handler MCP chạy song song)
-	cache       *vecCache
 	briefBudget int    // 0 → defaultBriefingBudget
 	project     string // project của tiến trình (MCP server theo cwd); "" = chung
+
+	run execx.Runner // lệnh ngoài trích chữ tài liệu (pdftotext…); nil → execx.OS
 }
+
+// SetRunner thay runner lệnh ngoài (test dùng fake).
+func (b *Brain) SetRunner(r execx.Runner) { b.run = r }
 
 func New(st *store.Store, eg *egress.Egress, cfg *config.Config) *Brain {
 	return &Brain{st: st, eg: eg, cfg: cfg}

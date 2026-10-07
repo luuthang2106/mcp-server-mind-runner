@@ -1,6 +1,7 @@
 package brain
 
 import (
+	"archive/zip"
 	"context"
 	"database/sql"
 	"os"
@@ -118,5 +119,59 @@ func TestFileTag(t *testing.T) {
 		if got := FileTag(in); got != want {
 			t.Errorf("FileTag(%q)=%q want %q", in, got, want)
 		}
+	}
+}
+
+// TestIngestDocxLabelsAndRejectsBinary: docx → chunk có nhãn mục; file nhị
+// phân đặt đuôi .txt bị từ chối, không ghi note nào.
+func TestIngestDocxLabelsAndRejectsBinary(t *testing.T) {
+	st := newStore(t)
+	b := New(st, nil, testCfg())
+	ctx := context.Background()
+	spaceID, err := st.SpaceByName(ctx, "personal")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "anh.txt")
+	if err := os.WriteFile(bin, []byte{0x89, 'P', 'N', 'G', 0, 0, 0, 1}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.IngestText(ctx, IngestTextParams{Path: bin, SpaceID: spaceID}); err == nil || !strings.Contains(err.Error(), "nhị phân") {
+		t.Fatalf("binary err=%v", err)
+	}
+	if _, err := b.IngestText(ctx, IngestTextParams{Path: dir, SpaceID: spaceID}); err == nil {
+		t.Fatal("thư mục phải lỗi")
+	}
+
+	p := filepath.Join(dir, "So tay.docx")
+	f, err := os.Create(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	zw := zip.NewWriter(f)
+	w, _ := zw.Create("word/document.xml")
+	_, _ = w.Write([]byte(`<w:document xmlns:w="w"><w:body>` +
+		`<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>Cài đặt</w:t></w:r></w:p>` +
+		`<w:p><w:r><w:t>Chạy brew install poppler.</w:t></w:r></w:p></w:body></w:document>`))
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	res, err := b.IngestText(ctx, IngestTextParams{Path: p, SpaceID: spaceID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var chunk string
+	if err := st.DB().QueryRowContext(ctx, `SELECT text FROM chunks WHERE note_id=? ORDER BY ordinal LIMIT 1`, res.NoteID).Scan(&chunk); err != nil {
+		t.Fatal(err)
+	}
+	if chunk != "[Cài đặt] Cài đặt\n\nChạy brew install poppler." {
+		t.Fatalf("chunk=%q", chunk)
+	}
+	var notes int
+	_ = st.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM notes`).Scan(&notes)
+	if notes != 1 {
+		t.Fatalf("notes=%d, file nhị phân không được ghi", notes)
 	}
 }

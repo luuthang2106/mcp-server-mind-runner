@@ -493,7 +493,7 @@ func trimAll(xs []string) []string {
 
 // IngestIn — tham số tool ingest.
 type IngestIn struct {
-	Path    string   `json:"path" jsonschema:"Absolute path of a text/markdown file or media file (audio, image, video)"`
+	Path    string   `json:"path" jsonschema:"Absolute path of a document (pdf, docx, pptx, epub, html, md, txt; rtf/doc/odt on macOS) or media file (audio, image, video)"`
 	Tags    []string `json:"tags,omitempty" jsonschema:"Topic tags (project, client, meeting series); file:<name> is added automatically"`
 	Title   string   `json:"title,omitempty" jsonschema:"Human title of the document (default: file name)"`
 	Summary string   `json:"summary,omitempty" jsonschema:"Optional 1-2 sentence summary, only if you have read the file"`
@@ -512,7 +512,8 @@ type IngestOut struct {
 func registerIngest(srv *mcp.Server, b *brain.Brain, st *store.Store, md *media.Media, defSpace string) {
 	mcp.AddTool(srv, &mcp.Tool{
 		Name: "ingest",
-		Description: "Store a file in long-term memory so it can be recalled later: text/markdown as a document, audio/video transcribed, images captioned. " +
+		Description: "Store a file in long-term memory so it can be recalled later: documents (pdf, docx, pptx, epub, html, markdown, text) are split into chunks labelled with page/slide/section so recall can cite \"page 42\", audio/video transcribed, images captioned. " +
+			"Scanned PDFs without a text layer, spreadsheets and binaries are rejected — tell the user rather than retrying. " +
 			"Use ONLY when the user asks to save/ingest/import a file — never on your own initiative; recordings that include other people need their consent. " +
 			"Add topic tags so later recall can filter. " +
 			"Idempotent (text by content, media by file sha256). Media returns immediately; transcription/captioning runs in the background.",

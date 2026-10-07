@@ -29,6 +29,10 @@ var paraSep = regexp.MustCompile(`\n\s*\n`)
 // tách theo đoạn rỗng; đoạn ngắn → 1 chunk; đoạn dài → gom câu (cắt sau
 // ". " "! " "? " ".\n") greedy ≤1000 rune; câu đơn >1000 → cắt cứng 1000.
 // Trim mọi chunk; bỏ chunk rỗng.
+//
+// Văn bản có marker vị trí (dòng "⟦nhãn⟧" do docread chèn) là tài liệu: các
+// đoạn ngắn cùng mục được gom tới ~1000 rune và mỗi chunk mở đầu "[nhãn] " để
+// embedding/recall biết vị trí (trang, slide, mục).
 func ChunkText(text string) []Chunk {
 	var chunks []Chunk
 	add := func(s string) {
@@ -36,7 +40,12 @@ func ChunkText(text string) []Chunk {
 			chunks = append(chunks, Chunk{Ordinal: len(chunks), TokenCount: EstTokens(s), Text: s})
 		}
 	}
-	for _, para := range paraSep.Split(text, -1) {
+	paras := paraSep.Split(text, -1)
+	if hasMarker(paras) {
+		chunkDocument(paras, add)
+		return chunks
+	}
+	for _, para := range paras {
 		para = strings.TrimSpace(para)
 		if para == "" {
 			continue
@@ -45,11 +54,78 @@ func ChunkText(text string) []Chunk {
 			add(para)
 			continue
 		}
-		for _, part := range packSentences(splitSentences(para)) {
+		for _, part := range packSentences(splitSentences(para), maxChunkRunes) {
 			add(part)
 		}
 	}
 	return chunks
+}
+
+// markerLabel: đoạn chỉ gồm "⟦nhãn⟧" → nhãn.
+func markerLabel(para string) (string, bool) {
+	p := strings.TrimSpace(para)
+	if strings.HasPrefix(p, "⟦") && strings.HasSuffix(p, "⟧") && !strings.Contains(p, "\n") {
+		return strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(p, "⟦"), "⟧")), true
+	}
+	return "", false
+}
+
+func hasMarker(paras []string) bool {
+	for _, p := range paras {
+		if _, ok := markerLabel(p); ok {
+			return true
+		}
+	}
+	return false
+}
+
+// chunkDocument: gom đoạn trong cùng mục (≤ trần trừ tiền tố nhãn), đổi mục
+// thì cắt chunk.
+func chunkDocument(paras []string, add func(string)) {
+	label := ""
+	var cur []string
+	curLen := 0
+	prefix := func() string {
+		if label == "" {
+			return ""
+		}
+		return "[" + label + "] "
+	}
+	limit := func() int { return max(maxChunkRunes-utf8.RuneCountInString(prefix()), maxChunkRunes/2) }
+	flush := func() {
+		if len(cur) > 0 {
+			add(prefix() + strings.Join(cur, "\n\n"))
+			cur, curLen = nil, 0
+		}
+	}
+	for _, para := range paras {
+		if l, ok := markerLabel(para); ok {
+			flush()
+			label = l
+			continue
+		}
+		para = strings.TrimSpace(para)
+		if para == "" {
+			continue
+		}
+		n := utf8.RuneCountInString(para)
+		if n > limit() {
+			flush()
+			for _, part := range packSentences(splitSentences(para), limit()) {
+				add(prefix() + part)
+			}
+			continue
+		}
+		if curLen > 0 && curLen+2+n > limit() {
+			flush()
+		}
+		if curLen > 0 {
+			curLen += 2
+		}
+		cur = append(cur, para)
+		curLen += n
+	}
+	flush()
 }
 
 // splitSentences cắt SAU dấu . ! ? (khi theo sau là space/xuống dòng),
@@ -74,9 +150,9 @@ func splitSentences(s string) []string {
 	return out
 }
 
-// packSentences gom câu greedy thành các mảnh ≤1000 rune (nối bằng space);
-// câu đơn >1000 rune cắt cứng từng 1000.
-func packSentences(sentences []string) []string {
+// packSentences gom câu greedy thành các mảnh ≤limit rune (nối bằng space);
+// câu đơn >limit rune cắt cứng từng limit.
+func packSentences(sentences []string, limit int) []string {
 	var out, cur []string
 	curLen := 0
 	flush := func() {
@@ -90,11 +166,11 @@ func packSentences(sentences []string) []string {
 		if s == "" {
 			continue
 		}
-		if rl := utf8.RuneCountInString(s); rl > maxChunkRunes {
+		if rl := utf8.RuneCountInString(s); rl > limit {
 			flush()
 			rs := []rune(s)
 			for len(rs) > 0 {
-				n := maxChunkRunes
+				n := limit
 				if len(rs) < n {
 					n = len(rs)
 				}
@@ -105,7 +181,7 @@ func packSentences(sentences []string) []string {
 			}
 			continue
 		}
-		if curLen > 0 && curLen+1+utf8.RuneCountInString(s) > maxChunkRunes {
+		if curLen > 0 && curLen+1+utf8.RuneCountInString(s) > limit {
 			flush()
 		}
 		if curLen > 0 {

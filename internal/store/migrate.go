@@ -18,7 +18,7 @@ import (
 var migrateFS embed.FS
 
 // LatestSchema là version schema hiện hành (doctor so với giá trị này).
-const LatestSchema = 7
+const LatestSchema = 8
 
 type migration struct {
 	version int
@@ -31,7 +31,14 @@ type migration struct {
 // cùng start: check tồn tại ngoài tx (chỉ để quyết định backup), rồi
 // BEGIN IMMEDIATE + re-check bên trong tx.
 func (s *Store) Migrate(ctx context.Context, backupDir string) error {
-	return migrateWithFS(ctx, s.db, backupDir, migrateFS)
+	if err := migrateWithFS(ctx, s.db, backupDir, migrateFS); err != nil {
+		return err
+	}
+	// vector float32 cũ (trước 0008, hoặc do binary cũ còn chạy ghi) → int8
+	if _, err := s.QuantizeLegacyEmbeddings(ctx); err != nil {
+		return fmt.Errorf("chuyển vector sang int8: %w", err)
+	}
+	return nil
 }
 
 // SchemaVersion trả version migration hiện tại.

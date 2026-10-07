@@ -69,6 +69,17 @@ limit = 5        # 1..50
 min_score = 0.2  # 0 = tắt ngưỡng; chỉ áp dụng khi rerank chạy được
 ```
 
+### Nạp tài liệu
+
+`ingest` (tool hoặc `mind-runner ingest <file>`) đọc: **pdf, docx, pptx, epub, html, markdown, txt** (rtf/doc/odt qua `textutil` trên macOS). Mỗi chunk mở đầu bằng nhãn vị trí — `[trang 42]`, `[slide 3]`, `[Hướng dẫn › Cài đặt]`, `[chương 2]` — nên recall trích dẫn được chỗ nào trong file.
+
+- PDF: dùng `pdftotext` nếu có (`brew install poppler`, chất lượng tốt nhất), không có thì dùng PDFKit sẵn trên macOS. PDF scan không có lớp chữ → báo lỗi (chưa OCR).
+- Từ chối file nhị phân/không phải UTF-8, bảng tính (xlsx/numbers), Keynote/Pages, file nén — không bao giờ lưu rác nhị phân vào bộ nhớ.
+
+### Tìm vector
+
+Vector lưu dạng **int8** (1 byte/chiều, đã chuẩn hoá; 1024 chiều ≈ 1 KB/chunk). Mỗi lần recall quét thẳng từ SQLite và chỉ giữ top-k — không có cache trong RAM, nên RAM mỗi tiến trình (Claude Code, Desktop, Qoder…) không tăng theo số tài liệu; phần đọc đĩa nằm trong page cache của macOS, dùng chung giữa các tiến trình. Sai số điểm so với float32 < 0.01, rerank xếp lại phía sau. Vector float32 cũ tự chuyển sang int8 khi migrate (schema 8).
+
 ### Client được hỗ trợ
 
 Mặc định không có hook: agent đọc MCP instructions và tự gọi `briefing` (đầu cuộc trò chuyện), `remember`/`task_add` (khi có quyết định/việc), `recall` (khi cần ngữ cảnh cũ). Tiền tố `mind:`, `mind recall:`, `mind todo:`, `mind fix:`, `mind forget:` ở đầu tin nhắn ép gọi tool tương ứng.

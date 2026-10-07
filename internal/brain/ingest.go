@@ -7,10 +7,16 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 	"unicode"
 
+	"mind-runner/internal/docread"
+	"mind-runner/internal/execx"
 	"mind-runner/internal/store"
 )
+
+// docReadTimeout: trần thời gian trích chữ (pdftotext/textutil) một file.
+const docReadTimeout = 2 * time.Minute
 
 // IngestTextParams tham số nạp file văn bản; Kind "" → "document".
 type IngestTextParams struct {
@@ -59,13 +65,20 @@ func (b *Brain) IngestText(ctx context.Context, p IngestTextParams) (WriteResult
 	if !ingestKinds[kind] {
 		return WriteResult{}, fmt.Errorf("invalid kind for ingest: %q (document|note|fact|preference|decision|task_hint)", kind)
 	}
-	data, err := os.ReadFile(p.Path)
-	if err != nil {
+	if fi, err := os.Stat(p.Path); err != nil {
 		return WriteResult{}, fmt.Errorf("đọc file: %w", err)
+	} else if fi.IsDir() {
+		return WriteResult{}, fmt.Errorf("%s là thư mục — nạp từng file", p.Path)
 	}
-	text := strings.TrimSpace(string(data))
-	if text == "" {
-		return WriteResult{}, fmt.Errorf("file rỗng hoặc chỉ khoảng trắng: %s", p.Path)
+	rctx, cancel := context.WithTimeout(ctx, docReadTimeout)
+	defer cancel()
+	run := b.run
+	if run == nil {
+		run = execx.OS{}
+	}
+	text, err := docread.Read(rctx, run, p.Path)
+	if err != nil {
+		return WriteResult{}, err
 	}
 	tags := slices.Clone(p.Tags)
 	if ft := FileTag(p.Path); ft != "" && !slices.Contains(tags, ft) {

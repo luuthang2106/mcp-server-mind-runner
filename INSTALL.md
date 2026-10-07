@@ -9,6 +9,7 @@ Tài liệu này viết để **dán nguyên văn cho agent Claude Code của b�
   embed (`/embeddings`), rerank (`/rerank`), chat cho extract (`/chat/completions`), omni (audio/ảnh/video — tuỳ chọn).
   Mặc định embed `text-embedding-v4`, rerank `qwen3-rerank`; đổi được trong config.
 - Claude Desktop và/hoặc Claude Code đã cài.
+- Tùy chọn: `brew install poppler` để đọc PDF tốt hơn (không có vẫn đọc được bằng PDFKit của macOS).
 - Tùy chọn: Ollama đang chạy nếu muốn một phần dữ liệu chỉ dùng model local (nâng cao: `[spaces.match]` + policy `local`).
 
 ## 1. Tải
@@ -145,6 +146,7 @@ Quay về bản cũ: dừng các client, chép `backups/pre-migrate-*.db` đè l
 - **Doctor báo "launchd plist chưa có"**: setup đã dùng `--skip-launchd` → chạy lại `setup` không kèm flag. Maintenance đầu tiên chạy lúc login kế tiếp, hoặc chạy tay `mind-runner maintenance`.
 - **`watch_dirs` không đọc được file**: thư mục ngoài home (Desktop/Documents/…) → cấp Full Disk Access cho binary trong System Settings → Privacy & Security → Full Disk Access.
 - **Space `work` policy `local`**: cần Ollama chạy sẵn; `mind-runner doctor` warn khi endpoint chết.
+- **Nạp PDF báo "không có lớp chữ"**: PDF scan/ảnh — chưa hỗ trợ OCR; xuất lại PDF có chữ hoặc chép text ra file .md rồi nạp. Bảng tính (xlsx/numbers) → xuất CSV/markdown trước.
 - **Ghi âm có người khác**: chỉ ingest khi mọi người trong bản ghi đã đồng ý (consent). Audio **không được redact** trước khi gửi omni — xem README mục Egress.
 
 ## 7. Gửi log để phân tích

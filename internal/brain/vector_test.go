@@ -31,8 +31,8 @@ func TestCosine(t *testing.T) {
 	}
 }
 
-// TestVectorTopOrderTiebreakCache: thứ tự score desc + tie chunk_id asc;
-// cache theo generation — ghi thô không BumpGen → còn dữ liệu cũ; BumpGen → mới.
+// TestVectorTopOrderTiebreakCache: thứ tự score desc + tie chunk_id asc; quét
+// thẳng DB (không cache) nên ghi thô thấy ngay; top-n heap.
 func TestVectorTopOrderTiebreakCache(t *testing.T) {
 	st := newStore(t)
 	vecByText := map[string][]float32{
@@ -70,7 +70,7 @@ func TestVectorTopOrderTiebreakCache(t *testing.T) {
 	if len(hits) != 3 || hits[0].NoteID != ids[0] || hits[1].NoteID != ids[2] || hits[2].NoteID != ids[1] {
 		t.Fatalf("hits=%+v, muốn [%d %d %d]", hits, ids[0], ids[2], ids[1])
 	}
-	if math.Abs(hits[0].Score-1) > 1e-9 || hits[1].Score <= hits[2].Score {
+	if math.Abs(hits[0].Score-1) > 0.01 || hits[1].Score <= hits[2].Score {
 		t.Fatalf("scores=%v", hits)
 	}
 
@@ -91,16 +91,16 @@ func TestVectorTopOrderTiebreakCache(t *testing.T) {
 		t.Fatalf("tie-break hits=%+v, muốn [%d %d ...]", hits, ids[0], res2.NoteID)
 	}
 
-	// cache: ghi thô KHÔNG BumpGen → VectorTop vẫn trả tập cũ
+	// không cache: row ghi thô (float32 kiểu cũ, không BumpGen) thấy ngay
 	rawInsertNote(t, st, spaceID, "gần3", []float32{1, 0, 0}, model)
 	hits, err = b.VectorTop(ctx, model, store.NoteFilter{}, []float32{1, 0, 0}, 10)
-	if err != nil || len(hits) != 4 {
-		t.Fatalf("cache: hits=%d err=%v, muốn còn 4 (chưa BumpGen)", len(hits), err)
-	}
-	st.BumpGen()
-	hits, err = b.VectorTop(ctx, model, store.NoteFilter{}, []float32{1, 0, 0}, 10)
 	if err != nil || len(hits) != 5 {
-		t.Fatalf("sau BumpGen: hits=%d err=%v, muốn 5", len(hits), err)
+		t.Fatalf("ghi thô: hits=%d err=%v, muốn 5", len(hits), err)
+	}
+	// top-n: đúng n hit đầu của danh sách đầy đủ
+	top2, err := b.VectorTop(ctx, model, store.NoteFilter{}, []float32{1, 0, 0}, 2)
+	if err != nil || len(top2) != 2 || top2[0] != hits[0] || top2[1] != hits[1] {
+		t.Fatalf("top2=%+v err=%v, muốn %+v", top2, err, hits[:2])
 	}
 }
 

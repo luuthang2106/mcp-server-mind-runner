@@ -1,12 +1,10 @@
 package brain
 
 import (
+	"container/heap"
 	"context"
 	"math"
-	"slices"
 	"sort"
-	"strconv"
-	"strings"
 
 	"mind-runner/internal/store"
 )
@@ -26,100 +24,77 @@ func Cosine(a, b []float32) float64 {
 	return dot / (math.Sqrt(na) * math.Sqrt(nb))
 }
 
-// vecCache: ảnh chụp embeddings theo (model, spaceIDs, tags) tại generation gen
-// + data_version dv (ghi từ process khác).
-type vecCache struct {
-	gen  uint64
-	dv   int64
-	key  string
-	rows []store.VecRow
-}
-
-func vecKey(model string, spaceIDs []int64, tags []string) string {
-	ids := slices.Clone(spaceIDs)
-	slices.Sort(ids)
-	var sb strings.Builder
-	sb.WriteString(model)
-	for _, id := range ids {
-		sb.WriteByte(':')
-		sb.WriteString(strconv.FormatInt(id, 10))
-	}
-	ts := slices.Clone(tags)
-	slices.Sort(ts)
-	for _, t := range ts {
-		sb.WriteString("#")
-		sb.WriteString(strconv.Quote(t))
-	}
-	return sb.String()
-}
-
-// vectors: embeddings theo (model, spaceIDs, tags), cache theo generation (ghi
-// trong process — BumpGen M1.3) + PRAGMA data_version (ghi của process khác:
-// maintenance, hook, CLI) — một trong hai đổi → đọc lại.
-func (b *Brain) vectors(ctx context.Context, model string, spaceIDs []int64, tags []string) ([]store.VecRow, error) {
-	key := vecKey(model, spaceIDs, tags)
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	// đọc TRƯỚC query: ghi chen giữa query và đây → gen/dv mới → cache coi như cũ
-	gen := b.st.Gen()
-	dv, err := b.st.DataVersion(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if c := b.cache; c != nil && c.gen == gen && c.dv == dv && c.key == key {
-		return c.rows, nil
-	}
-	rows, err := b.st.VectorsForSpaces(ctx, model,
-		store.NoteFilter{SpaceIDs: spaceIDs, Tags: tags, IncludeSuperseded: true})
-	if err != nil {
-		return nil, err
-	}
-	b.cache = &vecCache{gen: gen, dv: dv, key: key, rows: rows}
-	return rows, nil
-}
-
 // VectorHit: chunk khớp vector; sắp score desc, tie chunk_id asc.
 type VectorHit struct {
 	ChunkID, NoteID int64
 	Score           float64
 }
 
-// VectorTop: top-n chunk gần q nhất (cosine) trong note khớp filter. Cache
-// theo (model, spaces, tags); kind/status lọc trong bộ nhớ để đổi kinds giữa
-// các recall không phải đọc lại toàn bộ embeddings. Bỏ row sai chiều; n<=0 = không cắt.
+// better: a xếp trước b (score cao hơn; bằng → chunk_id nhỏ hơn).
+func better(a, b VectorHit) bool {
+	if a.Score != b.Score {
+		return a.Score > b.Score
+	}
+	return a.ChunkID < b.ChunkID
+}
+
+// hitHeap: min-heap theo better — gốc là hit tệ nhất trong top-n đang giữ.
+type hitHeap []VectorHit
+
+func (h hitHeap) Len() int           { return len(h) }
+func (h hitHeap) Less(i, j int) bool { return better(h[j], h[i]) }
+func (h hitHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
+func (h *hitHeap) Push(x any)        { *h = append(*h, x.(VectorHit)) }
+func (h *hitHeap) Pop() any {
+	old := *h
+	x := old[len(old)-1]
+	*h = old[:len(old)-1]
+	return x
+}
+
+// VectorTop: top-n chunk gần q nhất (cosine) trong note khớp filter. Quét
+// thẳng embeddings trong SQLite (vector int8) và chỉ giữ top-n — RAM không
+// tăng theo số tài liệu, nhiều process (mỗi app một process) không nhân bản
+// cache; trang đĩa nằm trong page cache của OS, dùng chung. Bỏ row sai chiều;
+// n<=0 = không cắt.
 func (b *Brain) VectorTop(ctx context.Context, model string, f store.NoteFilter, q []float32, n int) ([]VectorHit, error) {
-	rows, err := b.vectors(ctx, model, f.SpaceIDs, f.Tags)
+	qn := normalize(q)
+	var h hitHeap
+	err := b.st.ScanVectors(ctx, model, f, func(r *store.VecRow) error {
+		score, ok := r.Dot(qn)
+		if !ok {
+			return nil
+		}
+		hit := VectorHit{ChunkID: r.ChunkID, NoteID: r.NoteID, Score: score}
+		if n <= 0 || h.Len() < n {
+			heap.Push(&h, hit)
+		} else if better(hit, h[0]) {
+			h[0] = hit
+			heap.Fix(&h, 0)
+		}
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	kinds := map[string]bool{}
-	for _, k := range f.Kinds {
-		kinds[k] = true
-	}
-	hits := make([]VectorHit, 0, len(rows))
-	for _, r := range rows {
-		if len(r.Vec) != len(q) {
-			continue
-		}
-		if !f.IncludeSuperseded && r.Status != "active" {
-			continue
-		}
-		if len(kinds) > 0 && !kinds[r.Kind] {
-			continue
-		}
-		if f.Project != "" && r.Project != f.Project {
-			continue
-		}
-		hits = append(hits, VectorHit{ChunkID: r.ChunkID, NoteID: r.NoteID, Score: Cosine(q, r.Vec)})
-	}
-	sort.Slice(hits, func(i, j int) bool {
-		if hits[i].Score != hits[j].Score {
-			return hits[i].Score > hits[j].Score
-		}
-		return hits[i].ChunkID < hits[j].ChunkID
-	})
-	if n > 0 && len(hits) > n {
-		hits = hits[:n]
-	}
+	hits := []VectorHit(h)
+	sort.Slice(hits, func(i, j int) bool { return better(hits[i], hits[j]) })
 	return hits, nil
+}
+
+// normalize: bản sao chuẩn hoá L2 (vector 0 giữ nguyên → điểm 0).
+func normalize(v []float32) []float32 {
+	var n2 float64
+	for _, x := range v {
+		n2 += float64(x) * float64(x)
+	}
+	out := make([]float32, len(v))
+	if n2 == 0 {
+		return out
+	}
+	inv := 1 / math.Sqrt(n2)
+	for i, x := range v {
+		out[i] = float32(float64(x) * inv)
+	}
+	return out
 }
