@@ -75,15 +75,3 @@ func TestWindows(t *testing.T) {
 		t.Fatalf("ws=%d dropped=%d", len(ws), dropped)
 	}
 }
-
-// TestCondenseRoleOnlyRecords: file tạm của ZCode chỉ có message.role.
-func TestCondenseRoleOnlyRecords(t *testing.T) {
-	in := `{"message":{"content":[{"text":"nhớ giúp tôi deploy thứ sáu","type":"text"}],"role":"user"}}
-{"message":{"content":[{"text":"Đã ghi.","type":"text"}],"role":"assistant"}}
-`
-	got := condense([]byte(in))
-	want := "User: nhớ giúp tôi deploy thứ sáu\nAssistant: Đã ghi.\n"
-	if got != want {
-		t.Fatalf("got %q want %q", got, want)
-	}
-}

@@ -563,8 +563,8 @@ func registerBriefing(srv *mcp.Server, b *brain.Brain, st *store.Store, defSpace
 	mcp.AddTool(srv, &mcp.Tool{
 		Name: "briefing",
 		Description: "Load the user's context at the start of a conversation: overdue/due tasks, blocked tasks, open tasks, recent decisions and preferences, recent sessions. " +
-			"Call once at the beginning of a conversation. Gated to once per day (day starts at [briefing].day_start_hour, default 04:00): " +
-			"delivered=false means today's recap was already given (possibly injected by a hook) — do not retry. Use force=true only when the user asks for a recap.",
+			"Call at the start of every new conversation, before answering the first message. Gated to once per day (day starts at [briefing].day_start_hour, default 04:00): " +
+			"delivered=false means today's recap was already shown in another conversation — do not retry. Use force=true only when the user asks for a recap.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in BriefingIn) (*mcp.CallToolResult, BriefingOut, error) {
 		spaceID, err := st.SpaceByName(ctx, defSpace)
 		if err != nil {

@@ -257,13 +257,37 @@ func TestSetupClaudeCodeWiring(t *testing.T) {
 		t.Fatalf("calls=%v", fake.calls)
 	}
 
-	// hooks đã merge
-	data, err := os.ReadFile(filepath.Join(tmp, ".claude", "settings.json"))
+	// mặc định không cài hook
+	settings := filepath.Join(tmp, ".claude", "settings.json")
+	if _, err := os.Stat(settings); !os.IsNotExist(err) {
+		t.Fatalf("settings.json không được tạo khi không có --hooks: %v", err)
+	}
+	// --hooks: merge; chạy lại không --hooks: gỡ, giữ hook khác
+	code = RunSetup([]string{"--non-interactive", "--gateway-key=k", "--skip-launchd", "--claude-code", "--hooks", "--data-dir", dataDir}, &out, &errb, os.Getenv)
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%s", code, errb.String())
+	}
+	data, err := os.ReadFile(settings)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(data), "hook session-start") || !strings.Contains(string(data), "hook prompt") {
 		t.Fatalf("settings=%s", data)
+	}
+	var m map[string]any
+	_ = json.Unmarshal(data, &m)
+	hooks := m["hooks"].(map[string]any)
+	hooks["Stop"] = append(hooks["Stop"].([]any), map[string]any{"hooks": []any{map[string]any{"type": "command", "command": "/x/other.sh"}}})
+	data, _ = json.Marshal(m)
+	_ = os.WriteFile(settings, data, 0o600)
+	out.Reset()
+	code = RunSetup([]string{"--non-interactive", "--gateway-key=k", "--skip-launchd", "--claude-code", "--data-dir", dataDir}, &out, &errb, os.Getenv)
+	if code != 0 || !strings.Contains(out.String(), "đã gỡ 4 hook") {
+		t.Fatalf("exit=%d out=%s", code, out.String())
+	}
+	data, _ = os.ReadFile(settings)
+	if strings.Contains(string(data), "mind-runner") || !strings.Contains(string(data), "/x/other.sh") || strings.Contains(string(data), "SessionStart") {
+		t.Fatalf("after remove=%s", data)
 	}
 
 	// runner fail → warn, exit 0
@@ -434,70 +458,5 @@ func TestHookRecordsProject(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "project acme-api") {
 		t.Fatalf("recap phải ghi project: %s", out.String())
-	}
-}
-
-// TestHookSnapshotZCode: mỗi lần gọi hook có một file tạm mới chứa đúng lượt
-// hiện tại → mỗi prompt/stop thành một raw, gộp vào MỘT job extract; không lưu
-// đường dẫn tạm; cwd lấy từ biến môi trường dự án khi stdin không có.
-func TestHookSnapshotZCode(t *testing.T) {
-	_, dataDir := setupFresh(t)
-	repo := filepath.Join(t.TempDir(), "zc-proj")
-	if err := os.MkdirAll(filepath.Join(repo, ".git"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	env := func(k string) string {
-		if k == "ZCODE_PROJECT_DIR" {
-			return repo
-		}
-		return os.Getenv(k)
-	}
-	tmpFile := func(role, text string) string {
-		d := t.TempDir()
-		p := filepath.Join(d, "transcript.jsonl")
-		line, _ := json.Marshal(map[string]any{"message": map[string]any{
-			"role": role, "content": []map[string]string{{"type": "text", "text": text}}}})
-		if err := os.WriteFile(p, append(line, '\n'), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		return p
-	}
-	run := func(sub string, payload map[string]string) {
-		t.Helper()
-		in, _ := json.Marshal(payload)
-		writeHookStdin(t, string(in))
-		var out, errb bytes.Buffer
-		if code := RunHook([]string{sub, "--snapshot", "--client", "zcode"}, &out, &errb, env); code != 0 {
-			t.Fatalf("%s exit=%d stderr=%s", sub, code, errb.String())
-		}
-	}
-	empty := filepath.Join(t.TempDir(), "transcript.jsonl")
-	_ = os.WriteFile(empty, nil, 0o644)
-	run("session-start", map[string]string{"session_id": "zc-1", "transcript_path": empty})
-	run("prompt", map[string]string{"session_id": "zc-1", "transcript_path": tmpFile("user", "lượt một")})
-	run("stop", map[string]string{"session_id": "zc-1", "transcript_path": tmpFile("assistant", "trả lời một")})
-	run("prompt", map[string]string{"session_id": "zc-1", "transcript_path": tmpFile("user", "lượt hai")})
-	run("stop", map[string]string{"session_id": "zc-1", "transcript_path": tmpFile("assistant", "trả lời hai")})
-
-	st, err := store.Open(filepath.Join(dataDir, "mind-runner.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer st.Close()
-	ctx := context.Background()
-	sess, err := st.GetSession(ctx, "zc-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if sess.Project != "zc-proj" || sess.TranscriptPath != nil || sess.Client != "zcode" {
-		t.Fatalf("sess=%+v", sess)
-	}
-	raws, err := st.PendingRaws(ctx, "zc-1")
-	if err != nil || len(raws) != 4 {
-		t.Fatalf("raws=%d err=%v", len(raws), err)
-	}
-	var jobs int
-	if err := st.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM jobs WHERE type='extract_session'`).Scan(&jobs); err != nil || jobs != 1 {
-		t.Fatalf("jobs=%d err=%v", jobs, err)
 	}
 }

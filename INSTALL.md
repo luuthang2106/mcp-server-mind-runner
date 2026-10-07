@@ -45,7 +45,7 @@ Nếu vẫn bị chặn: System Settings → Privacy & Security → "Open Anyway
 > **API key không nằm trong `config.toml`.** Key chỉ được khai báo trong setting MCP của từng client
 > (env `MIND_RUNNER_GATEWAY_API_KEY`) — Claude Code do setup ghi giúp, Claude Desktop nhập trong hộp cấu hình extension.
 
-Claude Code (khuyên dùng — đăng ký MCP server kèm key + hooks phiên):
+Claude Code (khuyên dùng — đăng ký MCP server kèm key):
 
 ```bash
 ~/mind-runner/mind-runner setup --claude-code --non-interactive \
@@ -58,20 +58,11 @@ Endpoint và tên model nằm trong `~/.config/mind-runner/config.toml` (`[gatew
 Bỏ `--non-interactive` để setup hỏi từng mục.
 
 Setup sẽ: ghi config `~/.config/mind-runner/config.toml` (0600, không chứa key), khởi tạo DB, cài launchd maintenance 3:30 hằng ngày,
-ghi hooks `SessionStart/UserPromptSubmit/Stop/SessionEnd` vào `~/.claude/settings.json` (backup `settings.json.bak-<thời gian>`),
 và chạy `claude mcp add-json -s user mind-runner '{"command":…,"env":{"MIND_RUNNER_GATEWAY_API_KEY":…}}'`.
-Chạy lại setup an toàn: hooks/MCP cũ được thay chứ không nhân đôi.
+Mặc định **không cài hook**: agent tự quyết khi nào gọi `briefing`/`remember`/`recall`/`task_add` theo MCP instructions. Hook mind-runner cũ trong `~/.claude/settings.json` (nếu có) bị gỡ, hook khác giữ nguyên (backup `settings.json.bak-<thời gian>`).
+Muốn capture tự động bằng hook (recap chèn sẵn + ghi transcript mỗi lượt): thêm `--hooks`. Chạy lại setup an toàn: MCP cũ được thay chứ không nhân đôi.
 
-Qoder / ZCode (cài MCP server kèm key + hooks vào config của app; dùng chung được với `--claude-code`):
-
-```bash
-~/mind-runner/mind-runner setup --qoder --zcode --non-interactive --gateway-key <key>
-```
-
-- Qoder: ghi `mcpServers.mind-runner` + hooks `SessionStart/UserPromptSubmit/Stop/SessionEnd` vào `~/.qoder/settings.json` (hook khác giữ nguyên).
-- ZCode: ghi `mcp.servers.mind-runner` + `hooks` (`enabled: true`, `SessionStart/UserPromptSubmit/Stop` — ZCode không có SessionEnd) vào `~/.zcode/cli/config.json`.
-  ZCode chỉ đưa cho hook lượt hiện tại (câu hỏi + câu trả lời, không kèm tool), nên hook chạy `--snapshot`; ghi chú tự động vẫn gom theo phiên như Claude Code.
-- Bỏ `--gateway-key` khi chạy lại: key đã có trong `~/.claude.json`/Qoder/ZCode được dùng lại. Mở lại app sau khi setup.
+Qoder / ZCode / agent khác: chỉ cần đăng ký MCP server stdio kèm env (xem mục 5), không cần hook.
 
 Chỉ cấu hình chung (không đụng client): `~/mind-runner/mind-runner setup` (tương tác) hoặc `setup --non-interactive`.
 
@@ -91,8 +82,7 @@ Job cần cloud (embed/extract/omni) do MCP server xử lý (quét 5 phút/lần
 
 1. Claude Desktop: Settings → Extensions → kéo `mind-runner-<version>.mcpb` vào cửa sổ → nhập **Gateway URL** và **Gateway API key** (và tên model nếu chưa có `config.toml`) trong hộp cấu hình. Ô để trống = dùng giá trị trong `config.toml`.
 2. **Không cần dán custom instructions**: server gửi hướng dẫn dùng tool (gọi `briefing` đầu cuộc trò chuyện, `remember`, `recall`…) qua trường `instructions` của MCP — Claude Code, Claude Desktop và các agent hỗ trợ MCP instructions tự nạp.
-3. Qoder, ZCode: `setup --qoder` / `setup --zcode` (mục 3).
-4. Agent/client khác (Cursor, Codex, …): thêm server stdio:
+3. Qoder, ZCode, Cursor, Codex, …: thêm server stdio vào config MCP của app (cần đường dẫn tuyệt đối; khoá ngoài cùng tuỳ app — Qoder `~/.qoder/settings.json` → `mcpServers.mind-runner`, ZCode `~/.zcode/cli/config.json` → `mcp.servers.mind-runner` thêm `"type": "stdio"`):
 
 ```json
 {"command": "/Users/<you>/mind-runner/mind-runner", "args": ["mcp"],
@@ -103,11 +93,10 @@ Job cần cloud (embed/extract/omni) do MCP server xử lý (quét 5 phút/lần
 
 ## Recap đầu ngày
 
-Briefing (việc đang mở, quyết định, sở thích, phiên gần đây) được chèn **1 lần mỗi ngày làm việc** (việc của project đang mở lên đầu):
+Briefing (việc đang mở, quyết định, sở thích, phiên gần đây) được trả **1 lần mỗi ngày làm việc** (việc của project đang mở lên đầu):
 
-- Claude Code: hook `SessionStart` khi mở phiên mới, **và** hook `UserPromptSubmit` cho prompt đầu tiên của ngày mới — nên phiên mở từ tối qua (gập máy, sáng mở lại) vẫn nhận recap ở câu hỏi đầu tiên sáng nay. Các prompt sau đó không tốn token.
-- Qoder, ZCode: giống Claude Code (sau `setup --qoder` / `--zcode`).
-- Client khác: model gọi tool `briefing` theo instructions; `delivered=false` nghĩa là hôm nay đã brief.
+- Mặc định: model gọi tool `briefing` ở câu hỏi đầu của cuộc trò chuyện mới theo instructions; `delivered=false` nghĩa là hôm nay đã brief ở cuộc khác.
+- Claude Code cài với `--hooks`: hook `SessionStart` + `UserPromptSubmit` chèn sẵn recap, không phụ thuộc model.
 - Ngày làm việc bắt đầu lúc `[briefing].day_start_hour` (mặc định `4` — làm khuya qua nửa đêm vẫn tính là hôm trước):
 
 ```toml
@@ -127,11 +116,11 @@ Dữ liệu không mất. Schema DB tự nâng cấp ngay lần đầu binary m�
 3. Thoát rồi mở lại Claude Code (phiên đang mở vẫn chạy binary cũ trong bộ nhớ).
 4. Kiểm tra: `mind-runner version` ra bản mới, `mind-runner doctor` exit 0.
 
-Hooks/instructions mới đi kèm bản mới (hiếm) thì chạy thêm `mind-runner setup --claude-code --non-interactive` — release notes sẽ ghi rõ khi cần.
+Cấu hình setup mới đi kèm bản mới (hiếm) thì chạy thêm `mind-runner setup --claude-code --non-interactive` — release notes sẽ ghi rõ khi cần.
 
 ### Chỉ dùng Claude Code
 
-1. Tải zip mới. **Xoá binary cũ trước** rồi mới giải nén vào **đúng thư mục cũ**, vì hooks, MCP và launchd đều trỏ tới đường dẫn này. Ghi đè thẳng lên file đang chạy có thể làm macOS kill binary mới do cache chữ ký:
+1. Tải zip mới. **Xoá binary cũ trước** rồi mới giải nén vào **đúng thư mục cũ**, vì MCP và launchd đều trỏ tới đường dẫn này. Ghi đè thẳng lên file đang chạy có thể làm macOS kill binary mới do cache chữ ký:
 
    ```bash
    rm -f ~/mind-runner/mind-runner
@@ -139,7 +128,7 @@ Hooks/instructions mới đi kèm bản mới (hiếm) thì chạy thêm `mind-r
    xattr -cr ~/mind-runner
    ```
 
-2. Chạy lại setup để nhận hooks/cấu hình mới (an toàn khi chạy nhiều lần). **Không cần nhập lại key**: setup tự lấy key đang có trong setting MCP của Claude Code, hoặc key cũ trong `config.toml` rồi gỡ nó khỏi file:
+2. Chạy lại setup để nhận cấu hình mới (an toàn khi chạy nhiều lần). **Không cần nhập lại key**: setup tự lấy key đang có trong setting MCP của Claude Code, hoặc key cũ trong `config.toml` rồi gỡ nó khỏi file:
 
    ```bash
    ~/mind-runner/mind-runner setup --claude-code --non-interactive

@@ -22,7 +22,7 @@ import (
 // lỗi cấu hình in stderr nhưng cũng exit 0 (capture là best-effort).
 func RunHook(args []string, stdout, stderr io.Writer, env func(string) string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "usage: mind-runner hook session-start|prompt|stop|session-end [--snapshot] [--client NAME]")
+		fmt.Fprintln(stderr, "usage: mind-runner hook session-start|prompt|stop|session-end")
 		return 2
 	}
 	sub := args[0]
@@ -31,19 +31,6 @@ func RunHook(args []string, stdout, stderr io.Writer, env func(string) string) i
 	default:
 		fmt.Fprintf(stderr, "hook: subcommand lạ %q (session-start|prompt|stop|session-end)\n", sub)
 		return 2
-	}
-
-	opt := hookOpts{client: capture.ClientCode, env: env}
-	for i := 1; i < len(args); i++ {
-		switch args[i] {
-		case "--snapshot":
-			opt.snapshot = true
-		case "--client":
-			if i+1 < len(args) && args[i+1] != "" {
-				opt.client = args[i+1]
-				i++
-			}
-		}
 	}
 
 	cfgPath := env("MIND_RUNNER_CONFIG")
@@ -60,13 +47,13 @@ func RunHook(args []string, stdout, stderr io.Writer, env func(string) string) i
 	var hookErr error
 	switch sub {
 	case "session-start":
-		hookErr = hookBriefing(cfg, stdout, "SessionStart", opt)
+		hookErr = hookBriefing(cfg, stdout, "SessionStart")
 	case "prompt":
-		hookErr = hookBriefing(cfg, stdout, "UserPromptSubmit", opt)
+		hookErr = hookBriefing(cfg, stdout, "UserPromptSubmit")
 	case "stop":
-		hookErr = hookStop(cfg, base, false, opt)
+		hookErr = hookStop(cfg, base, false)
 	case "session-end":
-		hookErr = hookStop(cfg, base, true, opt)
+		hookErr = hookStop(cfg, base, true)
 	}
 	if hookErr != nil {
 		if lg, lerr := logging.New(base, "hook.err", "error"); lerr == nil {
@@ -78,32 +65,6 @@ func RunHook(args []string, stdout, stderr io.Writer, env func(string) string) i
 	return 0
 }
 
-// hookOpts: cờ dòng lệnh của hook.
-//
-// snapshot: client (ZCode) không đưa transcript thật mà ghi một file tạm mới
-// cho MỖI lần gọi hook, chỉ chứa lượt hiện tại (prompt ở UserPromptSubmit,
-// câu trả lời ở Stop). Khi đó chốt nguyên file mỗi lần gọi thay vì đọc delta
-// theo offset, và không lưu đường dẫn tạm vào session.
-type hookOpts struct {
-	snapshot bool
-	client   string
-	env      func(string) string
-}
-
-// projectDir: cwd của phiên; client không gửi "cwd" thì lấy biến môi trường
-// thư mục dự án mà client đặt cho hook.
-func (o hookOpts) projectDir(cwd string) string {
-	if cwd != "" || o.env == nil {
-		return cwd
-	}
-	for _, k := range []string{"CLAUDE_PROJECT_DIR", "ZCODE_PROJECT_DIR"} {
-		if v := o.env(k); v != "" {
-			return v
-		}
-	}
-	return ""
-}
-
 // hookBriefing phục vụ SessionStart và UserPromptSubmit: ghi nhận session rồi
 // chèn briefing qua additionalContext nếu space chưa được brief trong "ngày
 // làm việc" hiện tại (ranh giới = [briefing].day_start_hour).
@@ -112,7 +73,7 @@ func (o hookOpts) projectDir(cwd string) string {
 // session mở từ tối qua (gập máy, mở lại sáng nay) không chạy lại SessionStart,
 // nhưng prompt đầu tiên của ngày mới vẫn đi qua hook này. Đường nóng (đã brief)
 // chỉ tốn 1 SELECT meta, không dựng văn bản, không in gì.
-func hookBriefing(cfg config.Config, stdout io.Writer, event string, opt hookOpts) error {
+func hookBriefing(cfg config.Config, stdout io.Writer, event string) error {
 	var ev struct {
 		SessionID      string `json:"session_id"`
 		CWD            string `json:"cwd"`
@@ -132,28 +93,22 @@ func hookBriefing(cfg config.Config, stdout io.Writer, event string, opt hookOpt
 	}
 	defer st.Close()
 
-	ev.CWD = opt.projectDir(ev.CWD)
 	spaceID, err := st.SpaceByName(ctx, cfg.MatchSpace(ev.CWD))
 	if err != nil {
 		return err
 	}
 	var tp *string
-	if ev.TranscriptPath != "" && !opt.snapshot {
+	if ev.TranscriptPath != "" {
 		tp = &ev.TranscriptPath
 	}
 	now := time.Now()
 	// upsert cả ở prompt: session bắt đầu trước khi cài hook vẫn được capture.
-	if err := st.UpsertSessionStart(ctx, ev.SessionID, opt.client, spaceID, tp, now); err != nil {
+	if err := st.UpsertSessionStart(ctx, ev.SessionID, capture.ClientCode, spaceID, tp, now); err != nil {
 		return err
 	}
 	proj := project.Of(ev.CWD)
 	if err := st.SetSessionCWD(ctx, ev.SessionID, ev.CWD, proj); err != nil {
 		return err
-	}
-	if opt.snapshot && event == "UserPromptSubmit" && ev.TranscriptPath != "" {
-		if _, err := capture.Snapshot(ctx, st, ev.SessionID, ev.TranscriptPath, cfg.Retention.RawDays, now); err != nil {
-			return err
-		}
 	}
 
 	b := brain.New(st, nil, &cfg)
@@ -187,7 +142,7 @@ func hookBriefing(cfg config.Config, stdout io.Writer, event string, opt hookOpt
 	return nil
 }
 
-func hookStop(cfg config.Config, base string, sessionEnd bool, opt hookOpts) error {
+func hookStop(cfg config.Config, base string, sessionEnd bool) error {
 	var ev struct {
 		SessionID      string `json:"session_id"`
 		TranscriptPath string `json:"transcript_path"`
@@ -213,20 +168,13 @@ func hookStop(cfg config.Config, base string, sessionEnd bool, opt hookOpts) err
 	if err != nil {
 		return err
 	}
+	if ev.TranscriptPath != "" {
+		sess.TranscriptPath = &ev.TranscriptPath
+	}
+
 	now := time.Now()
-	if opt.snapshot {
-		if ev.TranscriptPath != "" {
-			if _, err := capture.Snapshot(ctx, st, sess.ID, ev.TranscriptPath, cfg.Retention.RawDays, now); err != nil {
-				return err
-			}
-		}
-	} else {
-		if ev.TranscriptPath != "" {
-			sess.TranscriptPath = &ev.TranscriptPath
-		}
-		if _, err := capture.Stop(ctx, st, sess, cfg.Retention.RawDays, filepath.Join(base, "spool"), now); err != nil {
-			return err
-		}
+	if _, err := capture.Stop(ctx, st, sess, cfg.Retention.RawDays, filepath.Join(base, "spool"), now); err != nil {
+		return err
 	}
 	if sessionEnd {
 		// phiên đã đóng: không chờ hết thời gian gộp

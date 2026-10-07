@@ -1,8 +1,8 @@
 # mind-runner
 
-MCP server bộ nhớ dài hạn local-first cho Claude trên macOS. Capture phiên làm việc qua hooks, brain (notes/recall/briefing/extract), media/omni (audio/ảnh/video → transcript/caption), egress chia policy cloud/local theo space.
+MCP server bộ nhớ dài hạn local-first cho Claude trên macOS. Agent tự quyết ghi/nhớ qua MCP tool theo instructions (hook capture tuỳ chọn), brain (notes/recall/briefing/extract), media/omni (audio/ảnh/video → transcript/caption), egress chia policy cloud/local theo space.
 
-Kiến trúc: một binary Go (không CGO) nói SQLite thuần (modernc) — MCP server chạy stdio cho Claude Desktop/Code, hooks `SessionStart/UserPromptSubmit/Stop/SessionEnd` ghi sự kiện phiên và chèn recap đầu ngày; worker queue trong cùng process xử lý embed/extract/summarize/transcribe qua egress (gateway cloud hoặc endpoint local kiểu Ollama), policy chọn theo space.
+Kiến trúc: một binary Go (không CGO) nói SQLite thuần (modernc) — MCP server chạy stdio cho Claude Desktop/Code/Qoder/ZCode/…; hooks `SessionStart/UserPromptSubmit/Stop/SessionEnd` (tuỳ chọn, `setup --claude-code --hooks`) ghi transcript và chèn recap đầu ngày; worker queue trong cùng process xử lý embed/extract/summarize/transcribe qua egress (gateway cloud hoặc endpoint local kiểu Ollama), policy chọn theo space.
 
 ## Build & test
 
@@ -48,11 +48,11 @@ Mỗi note giữ `text` là một câu tự nhiên; các trường phụ nằm t
 
 Task có thêm `why`, `owner`, `waiting_on`, `due` (YYYY-MM-DD), `constraints`; briefing có mục **Quá hạn / sắp đến hạn** (trong 3 ngày) và **Đang chờ người khác**. Extractor chạy nền cũng ghi các trường này.
 
-Đầu briefing có mục **Đã ghi kể từ recap trước**: note do hook/agent tự ghi (không gồm tài liệu nạp tay) + task mới/đã đóng kể từ lần recap trước (tối đa 7 ngày, 12 dòng), kèm `#id` — liếc qua, sai thì bảo agent sửa/xoá theo id.
+Đầu briefing có mục **Đã ghi kể từ recap trước**: note do agent (hoặc hook) tự ghi (không gồm tài liệu nạp tay) + task mới/đã đóng kể từ lần recap trước (tối đa 7 ngày, 12 dòng), kèm `#id` — liếc qua, sai thì bảo agent sửa/xoá theo id.
 
 ### Project tự động
 
-Không cần chia bộ nhớ. Mọi thứ nằm trong một kho, mỗi note/task/phiên tự mang nhãn `project` = tên thư mục gốc git của cwd (worktree → repo chính; không có git → tên thư mục; home hoặc `/` → không nhãn, ví dụ Claude Desktop). Hook và MCP server của Claude Code chạy với cwd = thư mục dự án nên nhãn có sẵn, không cấu hình gì.
+Không cần chia bộ nhớ. Mọi thứ nằm trong một kho, mỗi note/task/phiên tự mang nhãn `project` = tên thư mục gốc git của cwd (worktree → repo chính; không có git → tên thư mục; home hoặc `/` → không nhãn, ví dụ Claude Desktop). MCP server chạy với cwd = thư mục dự án (Claude Code) nên nhãn có sẵn, không cấu hình gì; client không đặt cwd → không nhãn.
 
 - **recall** tìm khắp nơi, nhưng note cùng project đang mở được đẩy lên trước khi điểm ngang nhau (không lọc mất kết quả). Tham số `project` chỉ dùng khi hỏi rõ về một project khác.
 - **task_list** liệt kê mọi việc, project hiện tại lên đầu, mỗi việc có `project`; `project` để lọc, `status: all` để xem cả việc đã xong/bỏ.
@@ -71,12 +71,13 @@ min_score = 0.2  # 0 = tắt ngưỡng; chỉ áp dụng khi rerank chạy đư�
 
 ### Client được hỗ trợ
 
-| Client | Cài | Capture tự động |
-|---|---|---|
-| Claude Code | `setup --claude-code` | transcript JSONL đọc theo offset (Stop/SessionEnd) |
-| Qoder | `setup --qoder` | như Claude Code (cùng định dạng), nhãn client `qoder` |
-| ZCode | `setup --zcode` | hook `--snapshot`: mỗi UserPromptSubmit/Stop chốt lượt hiện tại (ZCode chỉ đưa câu hỏi/câu trả lời, không có tool, không có SessionEnd) |
-| Claude Desktop | kéo `.mcpb` | không có hook — chỉ tool `remember`/`recall`… |
+Mặc định không có hook: agent đọc MCP instructions và tự gọi `briefing` (đầu cuộc trò chuyện), `remember`/`task_add` (khi có quyết định/việc), `recall` (khi cần ngữ cảnh cũ). Tiền tố `mind:`, `mind recall:`, `mind todo:`, `mind fix:`, `mind forget:` ở đầu tin nhắn ép gọi tool tương ứng.
+
+| Client | Cài |
+|---|---|
+| Claude Code | `setup --claude-code` (thêm `--hooks` để capture transcript tự động) |
+| Qoder, ZCode, Cursor, … | thêm server stdio vào config MCP của app (INSTALL.md mục 5) |
+| Claude Desktop | kéo `.mcpb` |
 
 ### Restore từ backup
 

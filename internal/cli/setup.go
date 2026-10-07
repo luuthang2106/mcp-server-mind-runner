@@ -33,8 +33,7 @@ func RunSetup(args []string, stdout, stderr io.Writer, env func(string) string) 
 	var (
 		nonInteractive = fs.Bool("non-interactive", false, "")
 		claudeCode     = fs.Bool("claude-code", false, "")
-		qoder          = fs.Bool("qoder", false, "")
-		zcode          = fs.Bool("zcode", false, "")
+		withHooks      = fs.Bool("hooks", false, "")
 		dataDir        = fs.String("data-dir", "", "")
 		gatewayURL     = fs.String("gateway-url", "", "")
 		gatewayKey     = fs.String("gateway-key", "", "")
@@ -79,16 +78,8 @@ func RunSetup(args []string, stdout, stderr io.Writer, env func(string) string) 
 		apiKey = cfg.LegacyAPIKey()
 	}
 	home := config.ExpandHome("~")
-	qoderPath := filepath.Join(home, ".qoder", "settings.json")
-	zcodePath := filepath.Join(home, ".zcode", "cli", "config.json")
-	if apiKey == "" && (*claudeCode || *qoder || *zcode) {
+	if apiKey == "" && *claudeCode {
 		apiKey = existingClaudeMCPKey(filepath.Join(home, ".claude.json"))
-		if apiKey == "" {
-			apiKey = existingKeyIn(qoderPath, "mcpServers")
-		}
-		if apiKey == "" {
-			apiKey = existingKeyIn(zcodePath, "mcp", "servers")
-		}
 	}
 
 	// Giá trị flag đè lên giá trị trong file.
@@ -212,42 +203,26 @@ func RunSetup(args []string, stdout, stderr io.Writer, env func(string) string) 
 			fmt.Fprintln(stderr, "setup: claude-code:", err)
 			return 1
 		}
-		cc := &ClaudeCfg{Path: filepath.Join(config.ExpandHome("~"), ".claude", "settings.json")}
-		if err := cc.MergeHooks(bin); err != nil {
-			fmt.Fprintln(stdout, "warn: claude-code: ghi hooks vào settings.json lỗi:", err)
-		} else {
-			fmt.Fprintln(stdout, "claude-code: đã ghi hooks SessionStart/UserPromptSubmit/Stop/SessionEnd")
+		// Mặc định KHÔNG cài hook: agent tự quyết gọi briefing/remember/recall
+		// theo MCP instructions; hook cũ của mind-runner bị gỡ. --hooks = bật
+		// capture tự động (recap chèn sẵn + extract transcript).
+		cc := &ClaudeCfg{Path: filepath.Join(home, ".claude", "settings.json")}
+		if *withHooks {
+			if err := cc.MergeHooks(bin); err != nil {
+				fmt.Fprintln(stdout, "warn: claude-code: ghi hooks vào settings.json lỗi:", err)
+			} else {
+				fmt.Fprintln(stdout, "claude-code: đã ghi hooks SessionStart/UserPromptSubmit/Stop/SessionEnd")
+			}
+		} else if n, err := cc.RemoveHooks(bin); err != nil {
+			fmt.Fprintln(stdout, "warn: claude-code: gỡ hooks cũ lỗi:", err)
+		} else if n > 0 {
+			fmt.Fprintf(stdout, "claude-code: đã gỡ %d hook mind-runner cũ (agent tự gọi tool theo instructions)\n", n)
 		}
 		if err := registerClaudeMCP(bin, apiKey); err != nil {
 			fmt.Fprintf(stdout, "warn: đăng ký MCP lỗi (%v) — chạy tay:\n  claude mcp add-json -s user mind-runner '%s'\n",
 				err, mcpServerJSON(bin, "<API_KEY>"))
 		} else {
 			fmt.Fprintln(stdout, "claude-code: đã đăng ký MCP server (user scope, key nằm trong env của server)")
-		}
-	}
-
-	if *qoder || *zcode {
-		bin, err := os.Executable()
-		if err != nil {
-			fmt.Fprintln(stderr, "setup:", err)
-			return 1
-		}
-		if *qoder {
-			if err := SetupQoder(qoderPath, bin, apiKey); err != nil {
-				fmt.Fprintln(stdout, "warn: qoder:", err)
-			} else {
-				fmt.Fprintf(stdout, "qoder: đã ghi MCP server + hooks vào %s\n", qoderPath)
-			}
-		}
-		if *zcode {
-			if err := SetupZCode(zcodePath, bin, apiKey); err != nil {
-				fmt.Fprintln(stdout, "warn: zcode:", err)
-			} else {
-				fmt.Fprintf(stdout, "zcode: đã ghi MCP server + hooks (SessionStart/UserPromptSubmit/Stop) vào %s\n", zcodePath)
-			}
-		}
-		if apiKey == "" {
-			fmt.Fprintln(stdout, "warn: chưa có API key — thêm --gateway-key để server gọi được gateway")
 		}
 	}
 
@@ -271,8 +246,8 @@ func RunSetup(args []string, stdout, stderr io.Writer, env func(string) string) 
 
 	fmt.Fprintf(stdout, "xong. Data dir: %s\n", base)
 	fmt.Fprintln(stdout, "Tiếp theo: Claude Desktop → kéo file .mcpb (nhập API key trong hộp cấu hình);"+
-		" Claude Code → setup --claude-code; Qoder → --qoder; ZCode → --zcode.")
-	fmt.Fprintln(stdout, "Client khác: thêm server stdio `mind-runner mcp` với env MIND_RUNNER_GATEWAY_API_KEY.")
+		" Claude Code → setup --claude-code.")
+	fmt.Fprintln(stdout, "Client khác (Qoder, ZCode, Cursor…): thêm server stdio `mind-runner mcp` với env MIND_RUNNER_GATEWAY_API_KEY — xem INSTALL.md.")
 	fmt.Fprintln(stdout, "Hướng dẫn dùng tool được server gửi tự động (MCP instructions) — không cần dán custom instructions.")
 	fmt.Fprintln(stdout, "lưu ý: khi ghi âm có người khác, chỉ ingest khi họ đã đồng ý (consent).")
 	return 0

@@ -9,11 +9,9 @@ import (
 	"time"
 )
 
-// ClaudeCfg thao tác trên settings.json của Claude Code (và client cùng định
-// dạng hooks như Qoder: Extra = cờ thêm vào lệnh hook, vd " --client qoder").
+// ClaudeCfg thao tác trên settings.json của Claude Code.
 type ClaudeCfg struct {
-	Path  string
-	Extra string
+	Path string
 }
 
 // hookSub: event Claude Code → subcommand của mind-runner.
@@ -35,10 +33,43 @@ func (c *ClaudeCfg) MergeHooks(binaryPath string) error {
 		if hooks == nil {
 			hooks = map[string]any{}
 		}
-		mergeHookGroups(hooks, binaryPath, hookSub, c.Extra)
+		mergeHookGroups(hooks, binaryPath, hookSub, "")
 		m["hooks"] = hooks
 		return nil
 	})
+}
+
+// RemoveHooks gỡ mọi hook mind-runner (binary tên mind-runner hoặc đúng
+// binaryPath) khỏi settings.json, giữ hook khác; event rỗng sau khi gỡ bị
+// xoá. Trả số hook đã gỡ.
+func (c *ClaudeCfg) RemoveHooks(binaryPath string) (int, error) {
+	if _, err := os.Stat(c.Path); os.IsNotExist(err) {
+		return 0, nil
+	}
+	n := 0
+	err := updateJSONFile(c.Path, func(m map[string]any) error {
+		hooks, _ := m["hooks"].(map[string]any)
+		if hooks == nil {
+			return nil
+		}
+		for ev, sub := range hookSub {
+			groups, ok := hooks[ev].([]any)
+			if !ok {
+				continue
+			}
+			n += countMindRunnerHooks(groups, sub, binaryPath)
+			if g := removeMindRunnerHooks(groups, sub, binaryPath); len(g) > 0 {
+				hooks[ev] = g
+			} else {
+				delete(hooks, ev)
+			}
+		}
+		if len(hooks) == 0 {
+			delete(m, "hooks")
+		}
+		return nil
+	})
+	return n, err
 }
 
 // mergeHookGroups: hooks[event] = danh sách group kiểu Claude Code
@@ -47,10 +78,10 @@ func mergeHookGroups(hooks map[string]any, binaryPath string, events map[string]
 	for ev, sub := range events {
 		cmd := fmt.Sprintf("%q hook %s%s", binaryPath, sub, extra)
 		groups, _ := hooks[ev].([]any)
-		if hasHookCommand(groups, cmd) && countMindRunnerHooks(groups, sub) == 1 {
+		if hasHookCommand(groups, cmd) && countMindRunnerHooks(groups, sub, binaryPath) == 1 {
 			continue
 		}
-		groups = removeMindRunnerHooks(groups, sub)
+		groups = removeMindRunnerHooks(groups, sub, binaryPath)
 		hooks[ev] = append(groups, map[string]any{
 			"hooks": []any{map[string]any{"type": "command", "command": cmd}},
 		})
@@ -123,7 +154,7 @@ func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
 }
 
 // isMindRunnerHook: command dạng `"<.../mind-runner>" hook <sub> [--cờ…]`.
-func isMindRunnerHook(cmd, sub string) bool {
+func isMindRunnerHook(cmd, sub, bin string) bool {
 	i := strings.LastIndex(cmd, " hook ")
 	if i < 0 {
 		return false
@@ -132,18 +163,18 @@ func isMindRunnerHook(cmd, sub string) bool {
 	if len(rest) == 0 || rest[0] != sub {
 		return false
 	}
-	bin := strings.Trim(cmd[:i], `"' `)
-	return filepath.Base(bin) == "mind-runner"
+	b := strings.Trim(cmd[:i], `"' `)
+	return filepath.Base(b) == "mind-runner" || (bin != "" && b == bin)
 }
 
-func countMindRunnerHooks(groups []any, sub string) int {
+func countMindRunnerHooks(groups []any, sub, bin string) int {
 	n := 0
 	for _, g := range groups {
 		gm, _ := g.(map[string]any)
 		hs, _ := gm["hooks"].([]any)
 		for _, h := range hs {
 			if hm, ok := h.(map[string]any); ok {
-				if c, _ := hm["command"].(string); isMindRunnerHook(c, sub) {
+				if c, _ := hm["command"].(string); isMindRunnerHook(c, sub, bin) {
 					n++
 				}
 			}
@@ -153,7 +184,7 @@ func countMindRunnerHooks(groups []any, sub string) int {
 }
 
 // removeMindRunnerHooks bỏ các hook mind-runner cũ của sub; group rỗng bị bỏ.
-func removeMindRunnerHooks(groups []any, sub string) []any {
+func removeMindRunnerHooks(groups []any, sub, bin string) []any {
 	out := groups[:0:0]
 	for _, g := range groups {
 		gm, ok := g.(map[string]any)
@@ -169,7 +200,7 @@ func removeMindRunnerHooks(groups []any, sub string) []any {
 		kept := hs[:0:0]
 		for _, h := range hs {
 			if hm, ok := h.(map[string]any); ok {
-				if c, _ := hm["command"].(string); isMindRunnerHook(c, sub) {
+				if c, _ := hm["command"].(string); isMindRunnerHook(c, sub, bin) {
 					continue
 				}
 			}
