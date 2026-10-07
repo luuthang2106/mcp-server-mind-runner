@@ -80,7 +80,7 @@ Job cần cloud (embed/extract/omni) do MCP server xử lý (quét 5 phút/lần
 
 ## 5. Claude Desktop & client khác
 
-1. Claude Desktop: Settings → Extensions → kéo `mind-runner-<version>.mcpb` vào cửa sổ → nhập **Gateway URL** và **Gateway API key** (và tên model nếu chưa có `config.toml`) trong hộp cấu hình. Ô để trống = dùng giá trị trong `config.toml`.
+1. Claude Desktop: Settings → Extensions → kéo `mind-runner-<version>.mcpb` vào cửa sổ → nhập **Gateway URL** và **Gateway API key** trong hộp cấu hình (chỉ 2 ô). Tên model lấy từ `config.toml` (`[gateway.models]`) — chưa chạy setup thì chạy `mind-runner setup` một lần hoặc sửa file đó.
 2. **Không cần dán custom instructions**: server gửi hướng dẫn dùng tool (gọi `briefing` đầu cuộc trò chuyện, `remember`, `recall`…) qua trường `instructions` của MCP — Claude Code, Claude Desktop và các agent hỗ trợ MCP instructions tự nạp.
 3. Qoder, ZCode, Cursor, Codex, …: thêm server stdio vào config MCP của app (cần đường dẫn tuyệt đối; khoá ngoài cùng tuỳ app — Qoder `~/.qoder/settings.json` → `mcpServers.mind-runner`, ZCode `~/.zcode/cli/config.json` → `mcp.servers.mind-runner` thêm `"type": "stdio"`):
 
