@@ -1,0 +1,40 @@
+{"key":"hcm-deploy","kind":"fact","space":"work","text":"Máy chủ production của công ty đặt tại data center HCM02, cấu hình 32 vCPU và 128GB RAM.","tags":["hạ-tầng"]}
+{"key":"sqlite-mem","kind":"decision","space":"work","text":"Chọn SQLite cho mind-runner vì local-first, không cần daemon.","tags":["mind-runner"]}
+{"key":"standing-meeting","kind":"note","space":"work","text":"Standup nhóm backend chuyển sang 9h30 sáng thứ Ba và thứ Năm hằng tuần.","tags":["họp"]}
+{"key":"ci-limit","kind":"fact","space":"work","text":"Pipeline CI chỉ chạy integration test trên nhánh release/* để tiết kiệm runner.","tags":["ci"]}
+{"key":"naming-api","kind":"preference","space":"work","text":"Đặt tên endpoint API theo danh từ số nhiều: /orders, /users.","tags":["api"]}
+{"key":"error-wrapping","kind":"preference","space":"work","text":"Trong Go, luôn wrap lỗi kèm ngữ cảnh bằng %w, không trả lỗi trần.","tags":["go"]}
+{"key":"namlong-migration","kind":"decision","space":"work","text":"Dự án Nam Long dùng chiến lược strangler fig để chuyển từ monolith sang microservices.","tags":["kiến-trúc"]}
+{"key":"oncall-rotation","kind":"note","space":"work","text":"Lịch trực oncall tuần này: Hùng phụ trách chính, chị Hương backup.","tags":["oncall"]}
+{"key":"postgres-reporting","kind":"decision","space":"work","text":"Báo cáo doanh thu tháng giữ nguyên Postgres read-replica, chưa chuyển sang warehouse.","tags":["dữ-liệu"]}
+{"key":"deploy-freeze","kind":"note","space":"work","text":"Đóng băng deploy từ 20/12 đến 05/01 để tránh rủi ro dịp Tết.","tags":["release"]}
+{"key":"logging-json","kind":"preference","space":"work","text":"Log service backend phải là JSON một dòng, có trường request_id.","tags":["log"]}
+{"key":"staging-refresh","kind":"fact","space":"work","text":"Staging refresh dữ liệu từ production mỗi Chủ nhật 2h sáng.","tags":["hạ-tầng"]}
+{"key":"timeout-rule","kind":"decision","space":"work","text":"Mọi HTTP call liên service đặt timeout mặc định 3 giây, retry tối đa 2 lần.","tags":["kiến-trúc"]}
+{"key":"code-review","kind":"preference","space":"work","text":"Review code tập trung vào đúng sai logic, không bắt lỗi style vặt.","tags":["quy-trình"]}
+{"key":"go-generics","kind":"fact","space":"learning","text":"Generics trong Go giúp tránh lặp code nhưng không nên lạm dụng cho mọi hàm.","tags":["go"]}
+{"key":"spaced-repetition","kind":"fact","space":"learning","text":"Ôn tập ngắt quãng (spaced repetition) hiệu quả hơn đọc lại nhiều lần trong một buổi.","tags":["học-tập"]}
+{"key":"rust-ownership","kind":"note","space":"learning","text":"Đã đọc chương ownership của Rust, hiểu borrow checker hơn.","tags":["rust"]}
+{"key":"english-podcast","kind":"preference","space":"learning","text":"Nghe podcast tiếng Anh tốc độ 1.25x khi chạy bộ buổi sáng.","tags":["tiếng-anh"]}
+{"key":"sql-window","kind":"fact","space":"learning","text":"Hàm cửa sổ SQL như ROW_NUMBER và LAG chạy sau WHERE và trước ORDER BY của kết quả cuối.","tags":["sql"]}
+{"key":"ml-embedding","kind":"fact","space":"learning","text":"Embedding là vector biểu diễn ngữ nghĩa; so khớp bằng cosine similarity.","tags":["ml"]}
+{"key":"anki-jp","kind":"note","space":"learning","text":"Bắt đầu dùng Anki cho từ vựng tiếng Nhật, 20 thẻ mới mỗi ngày.","tags":["tiếng-nhật"]}
+{"key":"algorithm-review","kind":"note","space":"learning","text":"Đã ôn lại thuật toán Dijkstra và cách dùng priority queue.","tags":["thuật-toán"]}
+{"key":"design-pattern","kind":"fact","space":"learning","text":"Strategy pattern phù hợp khi có nhiều cách xử lý thay thế nhau, chọn lúc chạy.","tags":["thiết-kế"]}
+{"key":"cache-aside","kind":"fact","space":"learning","text":"Cache-aside: đọc cache trước, miss thì đọc DB rồi ghi lại cache kèm TTL.","tags":["hệ-thống"]}
+{"key":"k8s-hpa","kind":"fact","space":"learning","text":"Horizontal Pod Autoscaler mặc định scale theo CPU; muốn scale theo QPS cần custom metrics.","tags":["k8s"]}
+{"key":"ddia-book","kind":"note","space":"learning","text":"Đang đọc cuốn Designing Data-Intensive Applications, chương về replication.","tags":["sách"]}
+{"key":"math-bayes","kind":"note","space":"learning","text":"Đã làm lại 10 bài xác suất cơ bản, quên công thức Bayes.","tags":["toán"]}
+{"key":"car-electric","kind":"note","space":"personal","text":"Anh Minh đang tìm mua xe hơi điện, ngân sách khoảng 900 triệu.","tags":["gia-đình"]}
+{"key":"gym-schedule","kind":"preference","space":"personal","text":"Tập gym 6h sáng thứ Hai, Tư, Sáu; nghỉ hoàn toàn Chủ nhật.","tags":["sức-khỏe"]}
+{"key":"coffee-habit","kind":"preference","space":"personal","text":"Uống cà phê đen không đường, tối đa hai ly một ngày.","tags":["thói-quen"]}
+{"key":"huong-job","kind":"note","space":"personal","text":"Chị Hương vừa chuyển sang công ty mới làm product manager.","tags":["gia-đình"]}
+{"key":"condo-rent","kind":"fact","space":"personal","text":"Căn hộ Nam Long quận 7 cho thuê 12 triệu một tháng, hợp đồng còn 8 tháng.","tags":["nhà-đất"]}
+{"key":"flight-nt","kind":"note","space":"personal","text":"Đã đặt vé máy bay Hà Nội – Nha Trang cho kỳ nghỉ 28/10, hãng VietJet.","tags":["du-lịch"]}
+{"key":"reading-night","kind":"preference","space":"personal","text":"Đọc sách giấy vào buổi tối trước khi ngủ, không dùng điện thoại trong phòng ngủ.","tags":["thói-quen"]}
+{"key":"meal-prep","kind":"note","space":"personal","text":"Chuẩn bị cơm gà cho cả tuần vào tối Chủ nhật.","tags":["nấu-ăn"]}
+{"key":"dentist","kind":"note","space":"personal","text":"Khám răng định kỳ ở nha khoa Sunrise, bác sĩ An phụ trách.","tags":["sức-khỏe"]}
+{"key":"budget-rule","kind":"decision","space":"personal","text":"Quy tắc chi tiêu cá nhân: 50% nhu cầu, 30% mong muốn, 20% tiết kiệm.","tags":["tài-chính"]}
+{"key":"parent-call","kind":"preference","space":"personal","text":"Gọi điện hỏi thăm bố mẹ vào tối Chủ nhật hằng tuần.","tags":["gia-đình"]}
+{"key":"run-target","kind":"fact","space":"personal","text":"Mục tiêu chạy bộ: 10km dưới 55 phút trước cuối năm.","tags":["sức-khỏe"]}
+{"key":"houseplant","kind":"note","space":"personal","text":"Đã mua thêm hai chậu trầu bà về đặt ở ban công.","tags":["nhà-cửa"]}

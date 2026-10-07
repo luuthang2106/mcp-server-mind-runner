@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.mind-runner.maintenance</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>{{.BinaryPath}}</string>
+		<string>maintenance</string>
+		<string>--daily</string>
+	</array>
+	<key>StartCalendarInterval</key>
+	<dict>
+		<key>Hour</key>
+		<integer>3</integer>
+		<key>Minute</key>
+		<integer>30</integer>
+	</dict>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>StandardOutPath</key>
+	<string>{{.LogDir}}/launchd.out.log</string>
+	<key>StandardErrorPath</key>
+	<string>{{.LogDir}}/launchd.err.log</string>
+</dict>
+</plist>

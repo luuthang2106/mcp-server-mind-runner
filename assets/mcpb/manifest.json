@@ -1,0 +1,72 @@
+{
+  "manifest_version": "0.3",
+  "name": "mind-runner",
+  "version": "__VERSION__",
+  "description": "Bộ nhớ dài hạn local-first cho Claude: briefing, recall, ghi chú và media/omni trên macOS.",
+  "author": {
+    "name": "mind-runner contributors",
+    "url": "https://github.com/luuthang2106/mcp-server-mind-runner"
+  },
+  "server": {
+    "type": "binary",
+    "entry_point": "bin/mind-runner",
+    "mcp_config": {
+      "command": "${__dirname}/bin/mind-runner",
+      "args": [
+        "mcp"
+      ],
+      "env": {
+        "MIND_RUNNER_GATEWAY_BASE_URL": "${user_config.base_url}",
+        "MIND_RUNNER_GATEWAY_API_KEY": "${user_config.api_key}",
+        "MIND_RUNNER_MODEL_EXTRACT": "${user_config.model_extract}",
+        "MIND_RUNNER_MODEL_EMBED": "${user_config.model_embed}",
+        "MIND_RUNNER_MODEL_RERANK": "${user_config.model_rerank}",
+        "MIND_RUNNER_MODEL_OMNI": "${user_config.model_omni}",
+        "MIND_RUNNER_BUNDLED": "1"
+      }
+    }
+  },
+  "user_config": {
+    "base_url": {
+      "type": "string",
+      "title": "Gateway URL",
+      "description": "Endpoint OpenAI-compatible, ví dụ https://gateway.example.com/v1. Để trống = dùng [gateway].base_url trong config.toml.",
+      "required": false
+    },
+    "api_key": {
+      "type": "string",
+      "title": "Gateway API key",
+      "description": "Key cho gateway (embed/rerank/extract/omni). Lưu trong keychain của Claude Desktop, không ghi vào config.toml.",
+      "required": false,
+      "sensitive": true
+    },
+    "model_extract": {
+      "type": "string",
+      "title": "Model extract",
+      "description": "Model chat dùng trích ghi chú/việc từ phiên. Để trống = theo config.toml.",
+      "required": false
+    },
+    "model_embed": {
+      "type": "string",
+      "title": "Model embed",
+      "description": "Model embedding. Để trống = theo config.toml (mặc định text-embedding-v4).",
+      "required": false
+    },
+    "model_rerank": {
+      "type": "string",
+      "title": "Model rerank",
+      "description": "Model rerank. Để trống = theo config.toml (mặc định qwen3-rerank).",
+      "required": false
+    },
+    "model_omni": {
+      "type": "string",
+      "title": "Model omni",
+      "description": "Model đa phương thức cho audio/ảnh/video. Để trống = theo config.toml.",
+      "required": false
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/luuthang2106/mcp-server-mind-runner"
+  }
+}

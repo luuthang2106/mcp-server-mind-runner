@@ -1,0 +1,52 @@
+{"query":"sqlite local-first mind-runner","relevant":["sqlite-mem"]}
+{"query":"standup nhóm backend mấy giờ","relevant":["standing-meeting"]}
+{"query":"pipeline CI chạy integration test nhánh nào","relevant":["ci-limit"]}
+{"query":"trực oncall tuần này ai","relevant":["oncall-rotation"]}
+{"query":"đóng băng deploy dịp Tết","relevant":["deploy-freeze"]}
+{"query":"staging refresh dữ liệu khi nào","relevant":["staging-refresh"]}
+{"query":"timeout HTTP liên service","relevant":["timeout-rule"]}
+{"query":"review code có nên bắt style không","relevant":["code-review"]}
+{"query":"generics trong Go","relevant":["go-generics"]}
+{"query":"spaced repetition","relevant":["spaced-repetition"]}
+{"query":"borrow checker Rust","relevant":["rust-ownership"]}
+{"query":"podcast tiếng Anh tốc độ","relevant":["english-podcast"]}
+{"query":"hàm cửa sổ ROW_NUMBER","relevant":["sql-window"]}
+{"query":"embedding cosine similarity","relevant":["ml-embedding"]}
+{"query":"Anki từ vựng tiếng Nhật","relevant":["anki-jp"]}
+{"query":"thuật toán Dijkstra","relevant":["algorithm-review"]}
+{"query":"Strategy pattern khi nào dùng","relevant":["design-pattern"]}
+{"query":"cache-aside TTL","relevant":["cache-aside"]}
+{"query":"HPA scale theo QPS","relevant":["k8s-hpa"]}
+{"query":"sách Designing Data-Intensive Applications","relevant":["ddia-book"]}
+{"query":"công thức Bayes","relevant":["math-bayes"]}
+{"query":"gym 6h sáng thứ mấy","relevant":["gym-schedule"]}
+{"query":"cà phê đen không đường","relevant":["coffee-habit"]}
+{"query":"chị Hương product manager","relevant":["huong-job"]}
+{"query":"căn hộ Nam Long quận 7 cho thuê","relevant":["condo-rent"]}
+{"query":"vé máy bay Nha Trang VietJet","relevant":["flight-nt"]}
+{"query":"đọc sách giấy buổi tối","relevant":["reading-night"]}
+{"query":"cơm gà chuẩn bị cả tuần","relevant":["meal-prep"]}
+{"query":"nha khoa Sunrise bác sĩ An","relevant":["dentist"]}
+{"query":"quy tắc 50 30 20","relevant":["budget-rule"]}
+{"query":"gọi điện hỏi thăm bố mẹ","relevant":["parent-call"]}
+{"query":"mục tiêu chạy bộ 10km","relevant":["run-target"]}
+{"query":"trầu bà ban công","relevant":["houseplant"]}
+{"query":"data center HCM02 ở đâu","relevant":["hcm-deploy"]}
+{"query":"báo cáo doanh thu Postgres read-replica","relevant":["postgres-reporting"]}
+{"query":"vì sao dùng cơ sở dữ liệu nhúng không cần daemon","relevant":["sqlite-mem"]}
+{"query":"mua ô tô điện của anh Minh","relevant":["car-electric"]}
+{"query":"dự án Nam Long chuyển đổi kiến trúc thế nào","relevant":["namlong-migration"]}
+{"query":"quy tắc đặt tên route REST","relevant":["naming-api"]}
+{"query":"xử lý lỗi trong Go nên làm gì","relevant":["error-wrapping"]}
+{"query":"chuẩn log cho microservice","relevant":["logging-json"]}
+{"query":"cau hinh may chu production","relevant":["hcm-deploy"]}
+{"query":"đọc gì về replication của database","relevant":["ddia-book"]}
+{"query":"thói quen buổi sáng khi chạy bộ","relevant":["english-podcast"]}
+{"query":"tiết kiệm 20 phần trăm thu nhập","relevant":["budget-rule"]}
+{"query":"thời khóa biểu tập luyện hằng tuần","relevant":["gym-schedule"]}
+{"query":"kinh nghiệm mua xe điện","relevant":["car-electric"]}
+{"query":"học tiếng Nhật thế nào mỗi ngày","relevant":["anki-jp"]}
+{"query":"tự động mở rộng pod theo lưu lượng","relevant":["k8s-hpa"]}
+{"query":"mua cây xanh trang trí nhà","relevant":["houseplant"]}
+{"query":"kế hoạch chăm sóc răng miệng","relevant":["dentist"]}
+{"query":"thuật toán tìm đường ngắn nhất","relevant":["algorithm-review"]}

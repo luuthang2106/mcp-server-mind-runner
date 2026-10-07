@@ -1,0 +1,10 @@
+# Tối thiểu theo plan 7.2: govet + staticcheck + unused. Version 2 = schema
+# golangci-lint v2.x (CI dùng `version: latest`).
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - govet
+    - staticcheck
+    - unused

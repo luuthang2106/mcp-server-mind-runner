@@ -1,0 +1,37 @@
+# goreleaser schema v2 — chỉ darwin (macOS-only theo spec §2); CGO_ENABLED=0
+# vì toàn bộ deps là pure Go (modernc sqlite).
+version: 2
+
+project_name: mind-runner
+
+builds:
+  - id: mind-runner
+    main: ./cmd/mind-runner
+    binary: mind-runner
+    env:
+      - CGO_ENABLED=0
+    goos: [darwin]
+    goarch: [arm64, amd64]
+    ldflags:
+      - -X mind-runner/internal/version.Version={{.Version}}
+      - -X mind-runner/internal/version.Commit={{.Commit}}
+    hooks:
+      # Ad-hoc codesign (open question #1: chưa có Apple Developer ID). arm64
+      # được Go linker tự ký; amd64 thì không nên ký ở đây. `signs: binary`
+      # không dùng được — filter đó chỉ khớp artifact UploadableBinary.
+      post:
+        - codesign --force -s - "{{ .Path }}"
+
+archives:
+  - id: default
+    formats: [zip]
+
+checksum:
+  name_template: checksums.txt
+
+release:
+  draft: false
+  # .mcpb (Claude Desktop) được workflow release upload thêm sau goreleaser
+
+changelog:
+  use: git
