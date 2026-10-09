@@ -25,6 +25,7 @@ var rulesTargets = []struct{ name, agentDir, file string }{
 	{"Gemini CLI", ".gemini", ".gemini/GEMINI.md"},
 	{"opencode", ".config/opencode", ".config/opencode/AGENTS.md"},
 	{"Windsurf", ".codeium/windsurf", ".codeium/windsurf/memories/global_rules.md"},
+	{"Qoder", ".qoder", ".qoder/AGENTS.md"},
 }
 
 func rulesBlock() string {
@@ -63,7 +64,7 @@ func RunRules(args []string, stdout, stderr io.Writer, env func(string) string) 
 	fs := flag.NewFlagSet("rules", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	uninstall := fs.Bool("uninstall", false, "gỡ khối mind-runner")
-	printOnly := fs.Bool("print", false, "chỉ in khối (để dán vào Cursor/Qoder…)")
+	printOnly := fs.Bool("print", false, "chỉ in khối (để dán vào Cursor…)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -104,7 +105,7 @@ func RunRules(args []string, stdout, stderr io.Writer, env func(string) string) 
 		fmt.Fprintf(stdout, "ok: %s → %s\n", t.name, path)
 	}
 	if !*uninstall {
-		fmt.Fprintln(stdout, "Cursor/Qoder/agent khác: `mind-runner rules --print` rồi dán vào phần rules chung của app.")
+		fmt.Fprintln(stdout, "Cursor/agent khác: `mind-runner rules --print` rồi dán vào phần rules chung của app.")
 	}
 	return code
 }

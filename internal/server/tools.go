@@ -559,9 +559,10 @@ type BriefingOut struct {
 func registerBriefing(srv *mcp.Server, b *brain.Brain, st *store.Store, defSpace string) {
 	mcp.AddTool(srv, &mcp.Tool{
 		Name: "briefing",
-		Description: "Load the user's context at the start of a conversation: overdue/due tasks, blocked tasks, open tasks, recent decisions and preferences, recent sessions. " +
-			"Call at the start of every new conversation, before answering the first message. Gated to once per day (day starts at [briefing].day_start_hour, default 04:00): " +
-			"delivered=false means today's recap was already shown in another conversation — do not retry. Use force=true only when the user asks for a recap.",
+		Description: "Recap of the user's context: overdue/due tasks, blocked tasks, open tasks, recent decisions and preferences, recent sessions. " +
+			"Call when a conversation opens with a greeting, the start of the day, or a question about what is pending/next — not before a concrete task (use recall for that). " +
+			"Gated to once per day (day starts at [briefing].day_start_hour, default 04:00): delivered=false means today's recap was already shown — do not retry. " +
+			"Use force=true only when the user asks for a recap.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in BriefingIn) (*mcp.CallToolResult, BriefingOut, error) {
 		spaceID, err := st.SpaceByName(ctx, defSpace)
 		if err != nil {
