@@ -40,8 +40,9 @@ func call(t *testing.T, cs *mcp.ClientSession, name string, args map[string]any,
 	return res
 }
 
-// TestStructuredRememberRecall: decision kèm why/alternatives; supersedes ẩn
-// quyết định cũ khỏi recall mặc định; kinds lọc đúng loại; ngày mơ hồ bị từ chối.
+// TestStructuredRememberRecall: decision kèm why/alternatives; supersedes XOÁ
+// CỨNG quyết định cũ (recall chỉ còn note mới; forget note cũ → not found);
+// kinds lọc đúng loại; ngày mơ hồ bị từ chối.
 func TestStructuredRememberRecall(t *testing.T) {
 	cs, done := connectTest(t)
 	defer done()
@@ -65,16 +66,11 @@ func TestStructuredRememberRecall(t *testing.T) {
 		t.Fatalf("hits=%+v stages=%v", out.Hits, out.Stages)
 	}
 
-	var all RecallOut
-	call(t, cs, "recall", map[string]any{"query": "kho dữ liệu", "kinds": []string{"decision"}, "include_superseded": true}, &all)
-	foundOld := false
-	for _, h := range all.Hits {
-		if h.NoteID == old.NoteID && h.Status == "superseded" && h.SupersededBy == nw.NoteID {
-			foundOld = true
-		}
-	}
-	if !foundOld {
-		t.Fatalf("include_superseded phải trả note cũ: %+v", all.Hits)
+	// note cũ đã bị xoá cứng: forget phải báo không tìm thấy
+	var fg ForgetOut
+	call(t, cs, "forget", map[string]any{"kind": "note", "id": old.NoteID}, &fg)
+	if fg.Forgotten {
+		t.Fatalf("note cũ phải đã bị xoá: %+v", fg)
 	}
 
 	if r := call(t, cs, "remember", map[string]any{"text": "họp", "when": "12/03/2025"}, nil); !r.IsError {
@@ -112,5 +108,22 @@ func TestStructuredTasks(t *testing.T) {
 	}
 	if r := call(t, cs, "task_add", map[string]any{"title": "x", "due": "thứ sáu"}, nil); !r.IsError {
 		t.Fatal("due sai định dạng phải isError")
+	}
+}
+
+// TestStructuredRememberProcedure: kind procedure qua tool remember + recall lọc kinds.
+func TestStructuredRememberProcedure(t *testing.T) {
+	cs, done := connectTest(t)
+	defer done()
+
+	var out RememberOut
+	res := call(t, cs, "remember", map[string]any{"text": "Deploy mind-runner: make build rồi kéo .mcpb vào Claude Desktop", "kind": "procedure"}, &out)
+	if res.IsError || out.NoteID == 0 {
+		t.Fatalf("remember procedure: %+v %v", out, res.Content)
+	}
+	var rec RecallOut
+	call(t, cs, "recall", map[string]any{"query": "deploy mind-runner", "kinds": []string{"procedure"}}, &rec)
+	if len(rec.Hits) != 1 || rec.Hits[0].Kind != "procedure" {
+		t.Fatalf("hits=%+v", rec.Hits)
 	}
 }

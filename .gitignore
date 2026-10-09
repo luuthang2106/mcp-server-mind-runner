@@ -3,3 +3,6 @@ dist/
 *.db-wal
 *.db-shm
 .DS_Store
+
+# fixtures eval trích xuất: raw phiên thật + nhãn tay — chỉ giữ trên máy, không đẩy lên repo public
+evals/extract/

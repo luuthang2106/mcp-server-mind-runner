@@ -26,13 +26,12 @@ func SanitizeFTSQuery(q string) string {
 }
 
 // NoteFilter: điều kiện lọc note dùng chung cho FTS và vector (alias bảng notes
-// là n). Rỗng = mọi space, mọi tag, mọi kind, chỉ note còn hiệu lực.
+// là n). Rỗng = mọi space, mọi tag, mọi kind; luôn chỉ note còn hiệu lực.
 type NoteFilter struct {
-	SpaceIDs          []int64
-	Tags              []string // AND — note phải mang đủ
-	Kinds             []string // OR — rỗng = mọi kind
-	IncludeSuperseded bool     // false = ẩn note status superseded
-	Project           string   // "" = mọi project; khác rỗng = chỉ note của project này
+	SpaceIDs []int64
+	Tags     []string // AND — note phải mang đủ
+	Kinds    []string // OR — rỗng = mọi kind
+	Project  string   // "" = mọi project; khác rỗng = chỉ note của project này
 }
 
 // Key: chuỗi tất định đại diện filter (khoá cache vector).
@@ -42,22 +41,17 @@ func (f NoteFilter) Key() string {
 		fmt.Fprintf(&b, "%d,", id)
 	}
 	b.WriteString("|" + strings.Join(f.Tags, "\x00") + "|" + strings.Join(f.Kinds, ","))
-	if f.IncludeSuperseded {
-		b.WriteString("|all")
-	}
 	if f.Project != "" {
 		b.WriteString("|p=" + f.Project)
 	}
 	return b.String()
 }
 
-// sql: mệnh đề AND (bắt đầu bằng " AND ...") + args, luôn loại note xoá mềm.
+// sql: mệnh đề AND (bắt đầu bằng " AND ...") + args; luôn loại note xoá mềm và
+// note legacy status='superseded' (lưới an toàn tới khi purge quét hết).
 func (f NoteFilter) sql() (string, []any) {
-	q := ` AND n.deleted_at IS NULL`
+	q := ` AND n.deleted_at IS NULL AND n.status = 'active'`
 	var args []any
-	if !f.IncludeSuperseded {
-		q += ` AND n.status = 'active'`
-	}
 	if len(f.SpaceIDs) > 0 {
 		q += ` AND n.space_id IN (` + placeholders(len(f.SpaceIDs)) + `)`
 		for _, id := range f.SpaceIDs {

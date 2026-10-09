@@ -229,8 +229,9 @@ func TestBriefingGate(t *testing.T) {
 	}
 }
 
-// TestBriefingCapturedSince: mục "Đã ghi kể từ recap trước" liệt kê note tự
-// ghi (hook/tool, không gồm ingest) + task mới/đóng trong cửa sổ, kèm #id.
+// TestBriefingCapturedSince: mục "Đã ghi kể từ recap trước" (cuối briefing)
+// liệt kê note tự ghi (hook/tool, không gồm ingest) + task mới còn mở trong
+// cửa sổ, kèm #id; việc đã đóng trong cửa sổ không lọt.
 func TestBriefingCapturedSince(t *testing.T) {
 	st := newStore(t)
 	ctx := context.Background()
@@ -273,11 +274,16 @@ func TestBriefingCapturedSince(t *testing.T) {
 		"Đã ghi kể từ recap trước",
 		fmt.Sprintf("note #%d [decision]: Chốt dùng ngưỡng 0.92", auto),
 		fmt.Sprintf("task #%d (việc mới): Tạo MR MCLBO-1697", newTask),
-		fmt.Sprintf("task #%d (đã xong): Việc cũ", oldTask),
 	} {
 		if !strings.Contains(res.Text, want) {
 			t.Errorf("thiếu %q trong:\n%s", want, res.Text)
 		}
+	}
+	if strings.Contains(res.Text, "(đã xong): Việc cũ") {
+		t.Errorf("việc đã đóng không được liệt kê:\n%s", res.Text)
+	}
+	if i, j := strings.Index(res.Text, "## Đã ghi"), strings.Index(res.Text, "## Notes mới"); i < j {
+		t.Errorf("mục 'Đã ghi' phải nằm cuối (i=%d, notes=%d):\n%s", i, j, res.Text)
 	}
 	capSec := res.Text[strings.Index(res.Text, "## Đã ghi"):]
 	if i := strings.Index(capSec[3:], "\n## "); i >= 0 {
@@ -290,5 +296,71 @@ func TestBriefingCapturedSince(t *testing.T) {
 	again, _ := b.Briefing(ctx, BriefingParams{SpaceID: spaceID, Now: day1.AddDate(0, 0, 1), Force: true})
 	if !strings.Contains(again.Text, "Tạo MR MCLBO-1697") {
 		t.Errorf("force:\n%s", again.Text)
+	}
+}
+
+// TestBriefingProjectFamily: mục "Việc đang mở" lọc theo project family —
+// "macallan" thấy cả "macallan-*" + đếm việc repo khác; project lẻ chỉ thấy
+// mình nó; không có project (Desktop) thấy tất cả, không đếm.
+func TestBriefingProjectFamily(t *testing.T) {
+	st := newStore(t)
+	ctx := context.Background()
+	b := New(st, nil, testCfg())
+	spaceID, _ := st.SpaceByName(ctx, "personal")
+	now := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
+
+	seed := func(title, proj string) int64 {
+		t.Helper()
+		id, _, err := st.InsertTaskWith(ctx, spaceID, title, store.TaskFields{Project: proj}, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	seed("Giữ mức phí", "macallan")
+	seed("Sửa form KYC", "macallan-0002-be-user-service")
+	seed("Dịch trang chủ", "translator-platform")
+
+	brief := func(proj string) string {
+		t.Helper()
+		b.SetProject(proj)
+		res, err := b.Briefing(ctx, BriefingParams{SpaceID: spaceID, Now: now, Force: true})
+		if err != nil || !res.Delivered {
+			t.Fatalf("project %q: %+v err=%v", proj, res, err)
+		}
+		return res.Text
+	}
+
+	// Umbrella: thấy task macallan + macallan-*; còn 1 việc ngoài family.
+	um := brief("macallan")
+	for _, want := range []string{"Giữ mức phí", "Sửa form KYC", "còn 1 việc ngoài project hiện tại"} {
+		if !strings.Contains(um, want) {
+			t.Errorf("macallan: thiếu %q trong:\n%s", want, um)
+		}
+	}
+	if strings.Contains(um, "Dịch trang chủ") {
+		t.Errorf("macallan: repo khác không được hiện:\n%s", um)
+	}
+
+	// Repo lẻ: chỉ thấy chính nó; còn 2 việc ngoài family.
+	one := brief("macallan-0002-be-user-service")
+	if !strings.Contains(one, "Sửa form KYC") || !strings.Contains(one, "còn 2 việc ngoài project hiện tại") {
+		t.Errorf("user-service: thiếu nội dung/đếm:\n%s", one)
+	}
+	for _, no := range []string{"Giữ mức phí", "Dịch trang chủ"} {
+		if strings.Contains(one, no) {
+			t.Errorf("user-service: không được hiện %q:\n%s", no, one)
+		}
+	}
+
+	// Không project (Desktop): thấy tất cả, không đếm phần còn lại.
+	all := brief("")
+	for _, want := range []string{"Giữ mức phí", "Sửa form KYC", "Dịch trang chủ"} {
+		if !strings.Contains(all, want) {
+			t.Errorf("Desktop: thiếu %q trong:\n%s", want, all)
+		}
+	}
+	if strings.Contains(all, "việc ngoài project") {
+		t.Errorf("Desktop: không được có dòng đếm:\n%s", all)
 	}
 }

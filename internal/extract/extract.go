@@ -152,7 +152,7 @@ func (x *Extractor) RunSession(ctx context.Context, sessionID string) error {
 	if derr != nil && lg != nil {
 		lg.Warn("extract: bỏ qua dò trùng", "err", shortErr(derr))
 	}
-	var stat struct{ skipped, superseded, updated, badIDs int }
+	var stat struct{ skipped, deleted, updated, badIDs int }
 
 	noteIDs := make([]int64, len(ex.Notes))
 	for i, n := range ex.Notes {
@@ -175,11 +175,11 @@ func (x *Extractor) RunSession(ctx context.Context, sessionID string) error {
 			return fmt.Errorf("notes[%d]: %w", i, err)
 		}
 		noteIDs[i] = res.NoteID
-		if old := plan.supersede[i]; old != 0 && old != res.NoteID {
-			if err := x.st.SupersedeNote(ctx, old, res.NoteID, now); err != nil {
-				return fmt.Errorf("notes[%d] supersede %d: %w", i, old, err)
+		if old := plan.replaces[i]; old != 0 && old != res.NoteID {
+			if _, err := x.st.HardDeleteNotes(ctx, []int64{old}); err != nil {
+				return fmt.Errorf("notes[%d] xoá note cũ %d: %w", i, old, err)
 			}
-			stat.superseded++
+			stat.deleted++
 		}
 	}
 	for i, tk := range ex.Tasks {
@@ -207,10 +207,10 @@ func (x *Extractor) RunSession(ctx context.Context, sessionID string) error {
 		}
 		stat.updated++
 	}
-	if lg != nil && (stat.skipped+stat.superseded+stat.badIDs > 0) {
+	if lg != nil && (stat.skipped+stat.deleted+stat.badIDs > 0) {
 		// chỉ số đo (không nội dung) — để chỉnh ngưỡng dò trùng
 		lg.Info("extract: dò trùng", "notes", len(ex.Notes), "skipped", stat.skipped,
-			"superseded", stat.superseded, "task_updates", stat.updated, "bad_task_ids", stat.badIDs)
+			"deleted", stat.deleted, "task_updates", stat.updated, "bad_task_ids", stat.badIDs)
 	}
 	for i, r := range ex.Relations {
 		var src *int64

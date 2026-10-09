@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 )
@@ -82,9 +81,10 @@ func TestDueAndWaitingTasks(t *testing.T) {
 	}
 }
 
-// TestNoteMetaMergeAndSupersede: ghi lại cùng text kèm meta mới → merge, không
-// trùng; supersede ẩn note cũ khỏi NotesByKind; khác space → ErrNoteNotFound.
-func TestNoteMetaMergeAndSupersede(t *testing.T) {
+// TestNoteMetaMergeAndRevive: ghi lại cùng text kèm meta mới → merge, không
+// trùng; row legacy status='superseded' ghi lại y hệt → hồi sinh active (nội
+// dung không mất trong cửa sổ trước khi purge quét).
+func TestNoteMetaMergeAndRevive(t *testing.T) {
 	st := openMigrated(t)
 	ctx := context.Background()
 	now := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
@@ -109,33 +109,22 @@ func TestNoteMetaMergeAndSupersede(t *testing.T) {
 		t.Fatalf("sau merge: meta=%+v tags=%v status=%q", n.Meta, n.Tags, n.Status)
 	}
 
-	newID, _, err := st.UpsertNote(ctx, &Note{SpaceID: 1, Kind: "decision", Text: "Chuyển sang SQLite",
-		Source: "mcp", CreatedAt: now, UpdatedAt: now})
+	// legacy: đánh dấu superseded bằng SQL tay (cơ chế cũ đã bỏ) rồi ghi lại
+	// y hệt → hồi sinh active, không mất nội dung.
+	if _, err := st.DB().ExecContext(ctx,
+		`UPDATE notes SET status='superseded', superseded_by=? WHERE id=?`, oldID, oldID); err != nil {
+		t.Fatal(err)
+	}
+	gID, fresh, err := st.UpsertNote(ctx, again)
+	if err != nil || fresh || gID != oldID {
+		t.Fatalf("hồi sinh: id=%d fresh=%v err=%v", gID, fresh, err)
+	}
+	n, err = st.FetchNote(ctx, oldID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := st.SupersedeNote(ctx, oldID, newID, now); err != nil {
-		t.Fatal(err)
-	}
-	ds, err := st.NotesByKind(ctx, 1, "decision", time.Time{}, 10)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(ds) != 1 || ds[0].ID != newID {
-		t.Fatalf("NotesByKind phải bỏ note superseded: %+v", ds)
-	}
-	n, _ = st.FetchNote(ctx, oldID)
-	if n.Status != "superseded" || n.SupersededBy == nil || *n.SupersededBy != newID {
-		t.Fatalf("old=%+v", n)
-	}
-
-	otherID, _, err := st.UpsertNote(ctx, &Note{SpaceID: 2, Kind: "decision", Text: "khác space",
-		Source: "mcp", CreatedAt: now, UpdatedAt: now})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := st.SupersedeNote(ctx, newID, otherID, now); !errors.Is(err, ErrNoteNotFound) {
-		t.Fatalf("khác space: err=%v", err)
+	if n.Status != "active" || n.SupersededBy != nil {
+		t.Fatalf("hồi sinh: status=%q superseded_by=%v", n.Status, n.SupersededBy)
 	}
 }
 

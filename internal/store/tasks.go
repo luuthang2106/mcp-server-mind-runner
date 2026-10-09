@@ -262,20 +262,11 @@ func (s *Store) TasksCreatedBetween(ctx context.Context, spaceID int64, from, to
 		spaceID, ts(from), ts(to), limit)
 }
 
-// TasksClosedBetween: task đóng (done/dropped) có updated_at trong [from, to)
-// nhưng tạo trước from (task vừa tạo vừa đóng trong khoảng đã nằm ở
-// TasksCreatedBetween).
-func (s *Store) TasksClosedBetween(ctx context.Context, spaceID int64, from, to time.Time, limit int) ([]Task, error) {
-	return s.queryTasks(ctx, `SELECT `+taskCols+` FROM tasks
-		WHERE space_id=? AND status IN ('done','dropped') AND updated_at >= ? AND updated_at < ?
-		  AND (created_at IS NULL OR created_at < ?) ORDER BY updated_at, id LIMIT ?`,
-		spaceID, ts(from), ts(to), ts(from), limit)
-}
-
 // TaskQuery: lọc/sắp danh sách task.
 type TaskQuery struct {
 	Status  string // "" = mọi trạng thái
 	Project string // "" = mọi project; khác rỗng = chỉ project này
+	Family  string // "" = mọi project; khác rỗng = project này + family "family-*"
 	Prefer  string // project đưa lên đầu (không lọc); "" = không ưu tiên
 	Limit   int
 }
@@ -293,6 +284,11 @@ func (s *Store) QueryTasks(ctx context.Context, spaceID int64, tq TaskQuery) ([]
 		q += ` AND project=?`
 		args = append(args, tq.Project)
 	}
+	if tq.Family != "" {
+		// COALESCE để task project NULL không bị ba giá trị logic loại oan.
+		q += ` AND (COALESCE(project,'')=? OR COALESCE(project,'') LIKE ?||'-%')`
+		args = append(args, tq.Family, tq.Family)
+	}
 	q += ` ORDER BY `
 	if tq.Prefer != "" {
 		q += `(COALESCE(project,'')=?) DESC, `
@@ -301,4 +297,15 @@ func (s *Store) QueryTasks(ctx context.Context, spaceID int64, tq TaskQuery) ([]
 	q += `updated_at DESC LIMIT ?`
 	args = append(args, tq.Limit)
 	return s.queryTasks(ctx, q, args...)
+}
+
+// CountOpenOutsideFamily: số việc đang mở KHÔNG thuộc project family — để
+// briefing nói rõ còn bao nhiêu việc ở repo khác.
+func (s *Store) CountOpenOutsideFamily(ctx context.Context, spaceID int64, family string) (int, error) {
+	var n int
+	err := s.DB().QueryRowContext(ctx, `SELECT count(*) FROM tasks
+		WHERE space_id=? AND status='open'
+		AND COALESCE(project,'')<>? AND COALESCE(project,'') NOT LIKE ?||'-%'`,
+		spaceID, family, family).Scan(&n)
+	return n, err
 }

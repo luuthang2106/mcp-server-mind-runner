@@ -95,3 +95,14 @@ func TestParseExtractionProseAroundJSON(t *testing.T) {
 		t.Fatalf("ex=%+v", ex)
 	}
 }
+
+// TestParseExtractionProcedure: procedure là kind extract hợp lệ (tầng kiến thức).
+func TestParseExtractionProcedure(t *testing.T) {
+	ex, err := ParseExtraction(`{"notes":[{"kind":"procedure","text":"Deploy: chạy make build rồi kéo .mcpb vào Claude Desktop."}],"tasks":[],"relations":[]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ex.Notes) != 1 || ex.Notes[0].Kind != "procedure" {
+		t.Fatalf("notes=%+v", ex.Notes)
+	}
+}

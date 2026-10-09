@@ -15,6 +15,7 @@ A wrong or duplicate memory is worse than a missing one. When unsure, leave it o
 - `decision` — a choice that was settled. Put the reason in `why` and rejected options in `alternatives` when the transcript states them.
 - `fact` — a stable truth about the user's projects, systems, people or setup. Use `as_of` (YYYY-MM-DD) when it can change, `ref` for its source (file, URL, ticket).
 - `preference` — how the user likes things done (answer style, tools, conventions). `scope` when it applies only somewhere (e.g. "Go code", "commit messages").
+- `procedure` — a repeatable way of doing something the user relies on ("how we deploy", "how I triage tickets"): the method, ordered steps or rules. Only when the transcript states the method; not a one-off event.
 - `note` — something that happened (what was done or discussed), not knowledge. `who`/`when` when stated.
 - `task_hint` — an unfinished thing mentioned in passing that is not concrete enough to be a task.
 

@@ -22,6 +22,9 @@ import (
 	"mind-runner/internal/worker"
 )
 
+// metaConsolidate: mốc enqueue consolidate gần nhất (RFC3339 UTC).
+const metaConsolidate = "last_consolidate_enqueue"
+
 // freeSpaceFn trả dung lượng còn trống (bytes) — injectable cho test.
 var freeSpaceFn = func(path string) (uint64, error) {
 	var st syscall.Statfs_t
@@ -33,8 +36,9 @@ var freeSpaceFn = func(path string) (uint64, error) {
 
 // RunMaintenance xử lý queue + backup theo thứ tự chuẩn (Task 1.6):
 //
-//	backfill embed → merge spool → [--retry-dead] retry-dead → queue → watch dirs
-//	→ purge → wal_checkpoint(TRUNCATE) → VACUUM INTO + rotate → quick_check
+//	backfill embed → merge spool → [--retry-dead] retry-dead → queue →
+//	consolidate enqueue → watch dirs → purge → wal_checkpoint(TRUNCATE)
+//	→ VACUUM INTO + rotate → quick_check
 func RunMaintenance(args []string, stdout, stderr io.Writer, env func(string) string) int {
 	fs := flag.NewFlagSet("maintenance", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -138,7 +142,33 @@ func RunMaintenance(args []string, stdout, stderr io.Writer, env func(string) st
 	}
 	fmt.Fprintf(stdout, "queue: processed=%d\n", processed)
 
-	// (3b) watch dirs (6.4): quét file mới trong [media].watch_dirs — sau queue
+	// (3b) consolidate: enqueue job LLM gộp note trùng định kỳ theo
+	// [consolidate].every_days (0 = tắt). Đặt SAU queue: launchd chạy không key,
+	// enqueue trước queue chỉ tổ bị claim rồi hoãn — job nằm chờ sweep MCP (có
+	// key) hoặc maintenance lần sau. Meta đặt sau enqueue; lỗi giữa chừng →
+	// lần sau thử lại. Enqueue idempotent → không bao giờ xếp trùng.
+	if days := cfg.Consolidate.EveryDays; days > 0 {
+		last, _, err := st.GetMeta(ctx, metaConsolidate)
+		if err != nil {
+			fmt.Fprintln(stderr, "maintenance: consolidate:", err)
+			return 1
+		}
+		if consolidateDue(last, days, time.Now()) {
+			if _, err := st.Enqueue(ctx, "consolidate", nil, time.Now()); err != nil {
+				fmt.Fprintln(stderr, "maintenance: consolidate:", err)
+				return 1
+			}
+			if err := st.SetMeta(ctx, metaConsolidate, time.Now().UTC().Format(time.RFC3339)); err != nil {
+				fmt.Fprintln(stderr, "maintenance: consolidate:", err)
+				return 1
+			}
+			fmt.Fprintf(stdout, "consolidate: enqueued (every_days=%d)\n", days)
+		} else {
+			fmt.Fprintln(stdout, "consolidate: chưa tới hạn")
+		}
+	}
+
+	// (3c) watch dirs (6.4): quét file mới trong [media].watch_dirs — sau queue
 	// (job cũ chạy trước), trước purge. File mtime < 60s hoặc đuôi lạ → bỏ qua.
 	if len(cfg.Media.WatchDirs) > 0 {
 		md := media.New(st, br, eg, &cfg, execx.OS{}, base)
@@ -161,8 +191,8 @@ func RunMaintenance(args []string, stdout, stderr io.Writer, env func(string) st
 		fmt.Fprintln(stderr, "maintenance: purge:", err)
 		return 1
 	}
-	fmt.Fprintf(stdout, "purge: events=%d episodes=%d relations=%d tasks=%d raws=%d jobs=%d media_rows=%d media_files=%d\n",
-		rep.Events, rep.Episodes, rep.Relations, rep.Tasks, rep.Raws, rep.Jobs, rep.MediaRows, rep.MediaFiles)
+	fmt.Fprintf(stdout, "purge: events=%d superseded=%d episodes=%d relations=%d tasks=%d raws=%d jobs=%d media_rows=%d media_files=%d\n",
+		rep.Events, rep.Superseded, rep.Episodes, rep.Relations, rep.Tasks, rep.Raws, rep.Jobs, rep.MediaRows, rep.MediaFiles)
 
 	// (5) WAL checkpoint
 	// busy=1 khi có reader/writer khác (MCP server, hook) đang giữ WAL → chưa
@@ -219,6 +249,20 @@ func RunMaintenance(args []string, stdout, stderr io.Writer, env func(string) st
 	}
 	fmt.Fprintln(stdout, "quick_check: ok")
 	return 0
+}
+
+// consolidateDue: đến hạn chạy consolidate chưa — chưa có mốc (lần đầu) hoặc
+// mốc hỏng → chạy ngay (thà chạy lại còn hơn tắt im lặng); ngược lại khi
+// now >= mốc + everyDays.
+func consolidateDue(last string, everyDays int, now time.Time) bool {
+	if last == "" {
+		return true
+	}
+	t, err := time.Parse(time.RFC3339, last)
+	if err != nil {
+		return true
+	}
+	return !now.Before(t.AddDate(0, 0, everyDays))
 }
 
 func rotateBackups(stdout io.Writer, dir string, keep int) {

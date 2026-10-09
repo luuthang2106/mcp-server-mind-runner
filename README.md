@@ -14,6 +14,12 @@ make lint    # golangci-lint: govet + staticcheck + unused
 make eval    # eval recall thật (recall@10 / MRR) — cần gateway key + mạng, chạy tay
 ```
 
+```bash
+make eval-extract   # eval trích xuất trên phiên thật: chạy RunSession rồi so với nhãn tay
+```
+
+Bộ eval trích xuất đọc fixtures ở `evals/extract/`: `<short8>.jsonl` là raw transcript của một phiên thật, `wants.json` là các ý chính mà kết quả phải chứa; cần gateway key như `make eval`. Vì là dữ liệu công việc thật nên cả thư mục này **không commit** (đã nằm trong `.gitignore`) — máy nào muốn đo thì tự đặt fixture vào.
+
 ## Đóng gói
 
 ```bash
@@ -27,7 +33,7 @@ make mcpb                               # dist/mind-runner-<version>.mcpb cho Cl
 - **Gatekeeper/quarantine**: binary tải từ mạng bị macOS cách ly → gỡ bằng `xattr -d com.apple.quarantine <binary>` (hoặc `xattr -cr <dir>` khi giải nén cả thư mục) — chi tiết trong INSTALL.md.
 - **Notarize (tương lai)**: có Dev ID thì bật config `notarize` của goreleaser; quy trình còn lại không đổi.
 
-CI (`.github/workflows/ci.yml`): test trên ubuntu + macos, lint; riêng push `main` đóng gói snapshot và upload artifact `.mcpb` + zip. Không job nào chạy `make eval`.
+CI (`.github/workflows/ci.yml`): test trên ubuntu + macos, lint; riêng push `main` đóng gói snapshot và upload artifact `.mcpb` + zip. Không job nào chạy `make eval` / `make eval-extract`.
 
 ## Dữ liệu
 
@@ -40,9 +46,10 @@ Mỗi note giữ `text` là một câu tự nhiên; các trường phụ nằm t
 
 | kind | trường |
 |---|---|
-| `decision` | `why`, `alternatives`, `who`, `when`; `supersedes` đánh dấu quyết định cũ là `superseded` |
+| `decision` | `why`, `alternatives`, `who`, `when`; `supersedes` xoá cứng quyết định cũ (phục hồi chỉ từ backup) |
 | `fact` | `ref` (nguồn), `as_of`, `who` |
 | `preference` | `scope`, `why` |
+| `procedure` | cách làm lặp lại (quy trình/các bước); không có trường phụ |
 | `note` | `who`, `when`, `ref` |
 | `document` (ingest) | `title`, `summary`, `ref` = đường dẫn file, tag `file:<tên>` |
 
@@ -61,12 +68,15 @@ Không cần chia bộ nhớ. Mọi thứ nằm trong một kho, mỗi note/task
 
 `[spaces]` vẫn còn cho người cần tách policy cloud/local (ví dụ một thư mục chỉ được dùng model local qua `[spaces.match]`), nhưng mặc định mọi thứ ở `personal` và tool không nhận tham số space.
 
-Recall mặc định trả 5 kết quả, bỏ hit có điểm rerank dưới 0.2 và ẩn note đã superseded; lọc được theo `kinds`. Chỉnh trong config:
+Recall mặc định trả 5 kết quả, bỏ hit có điểm rerank dưới 0.2 và luôn ẩn note đã xoá/đã quên; lọc được theo `kinds`. Chỉnh trong config:
 
 ```toml
 [recall]
 limit = 5        # 1..50
 min_score = 0.2  # 0 = tắt ngưỡng; chỉ áp dụng khi rerank chạy được
+
+[consolidate]
+every_days = 7   # định kỳ quét cả kho, gộp note kiến thức trùng (LLM); 0 = tắt
 ```
 
 ### Nạp tài liệu

@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -333,5 +334,86 @@ func TestMaintenanceScansWatchDirs(t *testing.T) {
 	}
 	if jobs != 1 {
 		t.Fatalf("jobs=%d, muốn 1", jobs)
+	}
+}
+
+// TestMaintenanceConsolidationCycle: lần chạy 1 enqueue consolidate (due ngay,
+// nằm sau queue nên chưa chạy); lần chạy 2 queue chạy job → model gộp 2 fact
+// trùng, note cũ bị xoá cứng; lần chạy 3 chưa tới hạn → không enqueue mới.
+func TestMaintenanceConsolidationCycle(t *testing.T) {
+	cfgPath, dataDir := setupFresh(t)
+	var mergeResp string
+	fake := egressfake.New(t, egressfake.Options{
+		ChatResp: func(_, _ string) string { return mergeResp },
+	})
+	t.Setenv("MIND_RUNNER_GATEWAY_BASE_URL", fake.URL)
+	// consolidate gọi Chat qua model extract (chung đường với extract) —
+	// setupFresh không set model nào.
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Gateway.Models.Extract = "test-extract"
+	if err := writeConfig(cfgPath, cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	a := seedNoteChunks(t, dataDir, "Server chạy ở cổng 8080")
+	b := seedNoteChunks(t, dataDir, "Cổng server là 8080")
+	// đổi kind sang fact (tầng kiến thức) để consolidate thấy
+	st, err := store.Open(filepath.Join(dataDir, "mind-runner.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB().Exec(`UPDATE notes SET kind='fact' WHERE id IN (?,?)`, a, b); err != nil {
+		t.Fatal(err)
+	}
+	st.Close()
+	mergeResp = fmt.Sprintf(`{"merges":[{"kind":"fact","text":"Server của dịch vụ chạy ở cổng 8080.","notes":[%d,%d]}]}`, a, b)
+
+	var out, errb bytes.Buffer
+	if code := RunMaintenance(nil, &out, &errb, os.Getenv); code != 0 {
+		t.Fatalf("lần 1: exit=%d stderr=%s", code, errb.String())
+	}
+	if !strings.Contains(out.String(), "consolidate: enqueued (every_days=7)") {
+		t.Fatalf("lần 1 out=%s", out.String())
+	}
+
+	out.Reset()
+	errb.Reset()
+	if code := RunMaintenance(nil, &out, &errb, os.Getenv); code != 0 {
+		t.Fatalf("lần 2: exit=%d stderr=%s", code, errb.String())
+	}
+	if !strings.Contains(out.String(), "consolidate: chưa tới hạn") {
+		t.Fatalf("lần 2 out=%s", out.String())
+	}
+
+	st, err = store.Open(filepath.Join(dataDir, "mind-runner.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	if _, err := st.FetchNote(ctx, a); err == nil {
+		t.Fatal("note cũ a chưa bị xoá")
+	}
+	if _, err := st.FetchNote(ctx, b); err == nil {
+		t.Fatal("note cũ b chưa bị xoá")
+	}
+	var n int
+	if err := st.DB().QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM notes WHERE kind='fact' AND deleted_at IS NULL AND text LIKE 'Server của dịch vụ%'`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("note gộp=%d, muốn 1", n)
+	}
+	var done int
+	if err := st.DB().QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM jobs WHERE type='consolidate' AND state='queued'`).Scan(&done); err != nil {
+		t.Fatal(err)
+	}
+	if done != 0 {
+		t.Fatalf("còn %d job consolidate queued", done)
 	}
 }

@@ -28,7 +28,7 @@ func bumpUsage(ctx context.Context, st *store.Store, key string) {
 // Trường có cấu trúc đều tuỳ chọn: chỉ điền điều người dùng thực sự nói.
 type RememberIn struct {
 	Text string   `json:"text" jsonschema:"One self-contained sentence in the user's language (what happened / what is true). Keep names, numbers, dates. No template words."`
-	Kind string   `json:"kind,omitempty" jsonschema:"decision (a choice made) | fact (stable truth about the user's world) | preference (how the user likes things) | note (event/observation, default) | task_hint (vague intention; use task_add for concrete to-dos)"`
+	Kind string   `json:"kind,omitempty" jsonschema:"decision (a choice made) | fact (stable truth about the user's world) | preference (how the user likes things) | procedure (a repeatable how-to) | note (event/observation, default) | task_hint (vague intention; use task_add for concrete to-dos)"`
 	Tags []string `json:"tags,omitempty" jsonschema:"Short lowercase topic tags, e.g. project or person names"`
 	Why  string   `json:"why,omitempty" jsonschema:"Reason or rationale, only if stated. Strongly recommended for decisions."`
 	Who  []string `json:"who,omitempty" jsonschema:"People involved or deciding, only if stated"`
@@ -37,15 +37,16 @@ type RememberIn struct {
 	Ref  string   `json:"ref,omitempty" jsonschema:"Source: URL, file path, document/meeting name, ticket id"`
 	// decision
 	Alternatives []string `json:"alternatives,omitempty" jsonschema:"Decision only: options considered and rejected"`
-	Supersedes   int64    `json:"supersedes,omitempty" jsonschema:"note_id of an earlier decision/fact this one replaces (from recall); the old one is hidden from recall but kept as history"`
+	Supersedes   int64    `json:"supersedes,omitempty" jsonschema:"note_id of an earlier decision/fact this one replaces (from recall); the old one is permanently deleted (recovery only via backups)"`
 	// preference
 	Scope string `json:"scope,omitempty" jsonschema:"Preference only: where it applies, e.g. 'code reviews', 'emails to clients'"`
 }
 
 // RememberOut — kết quả ghi: created=false nghĩa là nội dung đã có (ghi lặp = ôn lại).
 type RememberOut struct {
-	NoteID     int64 `json:"note_id"`
-	Created    bool  `json:"created"`
+	NoteID  int64 `json:"note_id"`
+	Created bool  `json:"created"`
+	// Superseded: id note cũ đã XOÁ CỨNG (khi tool được gọi kèm supersedes).
 	Superseded int64 `json:"superseded,omitempty"`
 }
 
@@ -55,7 +56,7 @@ func registerRemember(srv *mcp.Server, b *brain.Brain, st *store.Store, defSpace
 		Description: "Save something the user will want later: a decision (and why), a fact about their projects/people/setup, a preference, or a notable event. " +
 			"Call it proactively the moment it comes up — do not wait for the end of the conversation or for the user to say 'remember'. " +
 			"Fill only fields the user actually stated; never invent why/who/when. " +
-			"If it replaces an earlier decision or fact, recall first and pass its note_id as supersedes. " +
+			"If it replaces an earlier decision or fact, recall first and pass its note_id as supersedes (the old note is permanently deleted). " +
 			"Do NOT use for: small talk, transient in-session details, things already in the code/repo, secrets/credentials, or concrete to-dos (use task_add). " +
 			"Idempotent: saving identical text again only refreshes it (created=false).",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in RememberIn) (*mcp.CallToolResult, RememberOut, error) {
@@ -64,9 +65,9 @@ func registerRemember(srv *mcp.Server, b *brain.Brain, st *store.Store, defSpace
 			kind = "note"
 		}
 		switch kind {
-		case "note", "fact", "preference", "decision", "task_hint":
+		case "note", "fact", "preference", "decision", "task_hint", "procedure":
 		default:
-			return nil, RememberOut{}, fmt.Errorf("invalid kind %q (note|fact|preference|decision|task_hint)", in.Kind)
+			return nil, RememberOut{}, fmt.Errorf("invalid kind %q (note|fact|preference|decision|task_hint|procedure)", in.Kind)
 		}
 		for _, d := range []string{in.When, in.AsOf} {
 			if err := checkDateish(d); err != nil {
@@ -108,7 +109,7 @@ func registerRemember(srv *mcp.Server, b *brain.Brain, st *store.Store, defSpace
 		}
 		out := RememberOut{NoteID: res.NoteID, Created: res.Fresh}
 		if in.Supersedes != 0 && in.Supersedes != res.NoteID {
-			if err := st.SupersedeNote(ctx, in.Supersedes, res.NoteID, time.Now()); err != nil {
+			if _, err := st.HardDeleteNotes(ctx, []int64{in.Supersedes}); err != nil {
 				return nil, RememberOut{}, err
 			}
 			out.Superseded = in.Supersedes
@@ -120,12 +121,11 @@ func registerRemember(srv *mcp.Server, b *brain.Brain, st *store.Store, defSpace
 
 // RecallIn — tham số tool recall; schema suy từ struct + jsonschema tags.
 type RecallIn struct {
-	Query             string   `json:"query" jsonschema:"Specific keywords: names, project, document title, topic. Vietnamese without diacritics also matches."`
-	Kinds             []string `json:"kinds,omitempty" jsonschema:"Restrict to kinds: decision, fact, preference, note, task_hint, document (ingested files), transcript (audio/video), caption (images). Omit to search everything."`
-	Tags              []string `json:"tags,omitempty" jsonschema:"Only notes carrying all these tags (ingested files are tagged file:<name>)"`
-	Project           string   `json:"project,omitempty" jsonschema:"Only this project (git repo name). Omit — results from the current project are already ranked first; set only when the user asks about a specific other project."`
-	IncludeSuperseded bool     `json:"include_superseded,omitempty" jsonschema:"Also return decisions/facts that were replaced (for 'what did we decide before?' history questions)"`
-	Limit             int      `json:"limit,omitempty" jsonschema:"Max results (default 5)"`
+	Query   string   `json:"query" jsonschema:"Specific keywords: names, project, document title, topic. Vietnamese without diacritics also matches."`
+	Kinds   []string `json:"kinds,omitempty" jsonschema:"Restrict to kinds: decision, fact, preference, procedure, note, task_hint, document (ingested files), transcript (audio/video), caption (images). Omit to search everything."`
+	Tags    []string `json:"tags,omitempty" jsonschema:"Only notes carrying all these tags (ingested files are tagged file:<name>)"`
+	Project string   `json:"project,omitempty" jsonschema:"Only this project (git repo name). Omit — results from the current project are already ranked first; set only when the user asks about a specific other project."`
+	Limit   int      `json:"limit,omitempty" jsonschema:"Max results (default 5)"`
 }
 
 // HitOut một kết quả recall cho client — đủ nguồn/ngày để trích dẫn và tự
@@ -145,8 +145,6 @@ type HitOut struct {
 	Alternatives []string `json:"alternatives,omitempty"`
 	Scope        string   `json:"scope,omitempty"`
 	Tags         []string `json:"tags,omitempty"`
-	Status       string   `json:"status,omitempty"` // chỉ hiện khi khác active
-	SupersededBy int64    `json:"superseded_by,omitempty"`
 	SessionID    string   `json:"session_id,omitempty"`
 	CreatedAt    string   `json:"created_at"`
 	UpdatedAt    string   `json:"updated_at"`
@@ -175,17 +173,16 @@ func registerRecall(srv *mcp.Server, b *brain.Brain, st *store.Store, defSpace s
 		for _, k := range in.Kinds {
 			k = strings.ToLower(strings.TrimSpace(k))
 			if !brain.ValidKind(k) {
-				return nil, RecallOut{}, fmt.Errorf("invalid kind %q (decision|fact|preference|note|task_hint|document|transcript|caption)", k)
+				return nil, RecallOut{}, fmt.Errorf("invalid kind %q (decision|fact|preference|procedure|note|task_hint|document|transcript|caption)", k)
 			}
 			kinds = append(kinds, k)
 		}
 		res, err := b.Recall(ctx, brain.RecallParams{
-			Query:             in.Query,
-			Project:           strings.TrimSpace(in.Project),
-			Tags:              normTags(in.Tags),
-			Kinds:             kinds,
-			IncludeSuperseded: in.IncludeSuperseded,
-			Limit:             in.Limit,
+			Query:   in.Query,
+			Project: strings.TrimSpace(in.Project),
+			Tags:    normTags(in.Tags),
+			Kinds:   kinds,
+			Limit:   in.Limit,
 		})
 		if err != nil {
 			return nil, RecallOut{}, err
@@ -211,12 +208,6 @@ func registerRecall(srv *mcp.Server, b *brain.Brain, st *store.Store, defSpace s
 				CreatedAt:    h.CreatedAt.UTC().Format(time.RFC3339),
 				UpdatedAt:    h.UpdatedAt.UTC().Format(time.RFC3339),
 				Score:        h.Score,
-			}
-			if h.Status != "" && h.Status != "active" {
-				ho.Status = h.Status
-			}
-			if h.SupersededBy != nil {
-				ho.SupersededBy = *h.SupersededBy
 			}
 			if h.SessionID != nil {
 				ho.SessionID = *h.SessionID
@@ -634,7 +625,7 @@ func registerForget(srv *mcp.Server, st *store.Store) {
 		Name: "forget",
 		Description: "Forget a note or task (soft delete — disappears from recall/briefing immediately). " +
 			"Use only when the user asks to forget/delete something: recall or task_list first, show what will be removed and confirm before calling. " +
-			"For a decision that merely changed, use remember with supersedes instead (keeps history).",
+			"For a decision that merely changed, use remember with supersedes instead — the old note is permanently deleted.",
 		Annotations: &mcp.ToolAnnotations{DestructiveHint: boolPtr(true)},
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in ForgetIn) (*mcp.CallToolResult, ForgetOut, error) {
 		now := time.Now()

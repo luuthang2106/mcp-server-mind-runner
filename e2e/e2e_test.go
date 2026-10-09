@@ -260,12 +260,16 @@ func TestFullE2E(t *testing.T) {
 		model == nil || *model != "test-omni" {
 		t.Fatalf("media audio: status=%s transcript=%v model=%v", status, transcript, model)
 	}
-	// Queue sạch: mọi job done, không job failed/dead/kẹt.
-	if n := count(`SELECT COUNT(*) FROM jobs WHERE state != 'done'`); n != 0 {
+	// Queue sạch: mọi job done, không job failed/dead/kẹt — trừ consolidate:
+	// bước (3b) enqueue SAU queue (launchd không key), job nằm chờ sweep MCP.
+	if n := count(`SELECT COUNT(*) FROM jobs WHERE state != 'done' AND type != 'consolidate'`); n != 0 {
 		var jtype, state, lastErr string
 		_ = db.QueryRowContext(ctx,
-			`SELECT type, state, COALESCE(last_error,'') FROM jobs WHERE state != 'done' LIMIT 1`).Scan(&jtype, &state, &lastErr)
+			`SELECT type, state, COALESCE(last_error,'') FROM jobs WHERE state != 'done' AND type != 'consolidate' LIMIT 1`).Scan(&jtype, &state, &lastErr)
 		t.Fatalf("job chưa done: %d (vd %s/%s: %s)", n, jtype, state, lastErr)
+	}
+	if n := count(`SELECT COUNT(*) FROM jobs WHERE type='consolidate' AND state='queued'`); n != 1 {
+		t.Fatalf("consolidate chờ sweep = %d, muốn đúng 1", n)
 	}
 
 	// ── Phiên MCP 2: recall cuối thấy transcript + note đã ingest ─────────

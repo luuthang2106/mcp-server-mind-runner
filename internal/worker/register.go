@@ -7,6 +7,7 @@ import (
 
 	"mind-runner/internal/brain"
 	"mind-runner/internal/config"
+	"mind-runner/internal/consolidate"
 	"mind-runner/internal/egress"
 	"mind-runner/internal/execx"
 	"mind-runner/internal/extract"
@@ -24,7 +25,7 @@ type Deps struct {
 	DataDir string       // gốc dữ liệu (media/ nằm trong đây)
 }
 
-// RegisterAll: embed_chunk; extract_session/summarize_session; transcribe_media.
+// RegisterAll: embed_chunk; extract_session/summarize_session; transcribe_media; consolidate.
 func RegisterAll(reg *Registry, d Deps) {
 	reg.Register("embed_chunk", func(ctx context.Context, payload json.RawMessage) error {
 		var p struct {
@@ -69,5 +70,10 @@ func RegisterAll(reg *Registry, d Deps) {
 			return fmt.Errorf("payload transcribe_media: %w", err)
 		}
 		return md.Transcribe(ctx, p.MediaID)
+	})
+
+	cg := consolidate.New(d.Store, d.Brain, d.Egress, d.Config)
+	reg.Register("consolidate", func(ctx context.Context, _ json.RawMessage) error {
+		return cg.Run(ctx)
 	})
 }

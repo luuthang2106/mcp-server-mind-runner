@@ -12,15 +12,16 @@ import (
 )
 
 type Config struct {
-	DataDir   string    `toml:"data_dir"`
-	LogLevel  string    `toml:"log_level"`
-	Gateway   Gateway   `toml:"gateway"`
-	Spaces    Spaces    `toml:"spaces"`
-	Retention Retention `toml:"retention"`
-	Briefing  Briefing  `toml:"briefing"`
-	Recall    Recall    `toml:"recall"`
-	Media     Media     `toml:"media"`
-	Backup    Backup    `toml:"backup"`
+	DataDir     string      `toml:"data_dir"`
+	LogLevel    string      `toml:"log_level"`
+	Gateway     Gateway     `toml:"gateway"`
+	Spaces      Spaces      `toml:"spaces"`
+	Retention   Retention   `toml:"retention"`
+	Briefing    Briefing    `toml:"briefing"`
+	Recall      Recall      `toml:"recall"`
+	Media       Media       `toml:"media"`
+	Backup      Backup      `toml:"backup"`
+	Consolidate Consolidate `toml:"consolidate"`
 
 	path string
 	// legacyAPIKey: config.toml còn [gateway].api_key — bị BỎ QUA (key chỉ lấy
@@ -101,6 +102,12 @@ type Backup struct {
 	Keep int `toml:"keep"`
 }
 
+// Consolidate: job LLM định kỳ gộp note kiến thức trùng (decision/fact/
+// preference/procedure). EveryDays <= 0 = tắt.
+type Consolidate struct {
+	EveryDays int `toml:"every_days"`
+}
+
 // DefaultConfigPath trả về đường dẫn config: env MIND_RUNNER_CONFIG nếu có,
 // ngược lại ~/.config/mind-runner/config.toml.
 func DefaultConfigPath() string {
@@ -127,13 +134,14 @@ func Default() Config {
 		Gateway: Gateway{
 			Models: Models{Embed: "text-embedding-v4", Rerank: "qwen3-rerank"},
 		},
-		Spaces:    Spaces{Default: "personal"},
-		Retention: Retention{EventsDays: 365, RawDays: 90, JobsDays: 30},
-		Briefing:  Briefing{TokenBudget: 1500, DayStartHour: 4},
-		Recall:    Recall{Limit: 5, MinScore: 0.2},
-		Media:     Media{KeepOriginals: true, WatchDirs: []string{}},
-		Backup:    Backup{Keep: 7},
-		path:      DefaultConfigPath(),
+		Spaces:      Spaces{Default: "personal"},
+		Retention:   Retention{EventsDays: 365, RawDays: 90, JobsDays: 30},
+		Briefing:    Briefing{TokenBudget: 1500, DayStartHour: 4},
+		Recall:      Recall{Limit: 5, MinScore: 0.2},
+		Media:       Media{KeepOriginals: true, WatchDirs: []string{}},
+		Backup:      Backup{Keep: 7},
+		Consolidate: Consolidate{EveryDays: 7},
+		path:        DefaultConfigPath(),
 	}
 }
 

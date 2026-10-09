@@ -16,7 +16,7 @@ type Retention struct {
 
 // PurgeReport đếm từng loại đã xoá (chạy lại lần 2 → toàn 0).
 type PurgeReport struct {
-	Events, Episodes, Relations, Tasks, Raws, Jobs, MediaRows, MediaFiles int
+	Events, Superseded, Episodes, Relations, Tasks, Raws, Jobs, MediaRows, MediaFiles int
 }
 
 // purgeConn phần conn cần cho purge (test/stub không cần).
@@ -122,34 +122,44 @@ func purgeTx(ctx context.Context, c purgeConn, now time.Time, ret Retention) (Pu
 	}
 	rep.Events = len(ids)
 
-	// (2) Relations trước notes (FK): orphan không note nguồn + theo note sắp xoá.
+	// (1b) Legacy superseded (cơ chế cũ đã bỏ): mọi kind, mọi tuổi → quét sạch
+	// một lần. Hiếm khi trùng id với tập (1) (superseded note sự kiện) — chỉ
+	// lệch số đếm báo cáo, xoá vẫn đúng.
+	rows, err = c.QueryContext(ctx, `SELECT id FROM notes WHERE deleted_at IS NULL AND status='superseded' ORDER BY id`)
+	if err != nil {
+		return PurgeReport{}, nil, err
+	}
+	var supIDs []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return PurgeReport{}, nil, err
+		}
+		supIDs = append(supIDs, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return PurgeReport{}, nil, err
+	}
+	rep.Superseded = len(supIDs)
+	ids = append(ids, supIDs...)
+
+	// (2) Relations orphan cũ (không note nguồn); relations theo note nằm trong
+	// chuỗi xoá ở bước (3).
 	n, err := exec(`DELETE FROM relations WHERE source_note_id IS NULL AND created_at < ?`, evCut)
 	if err != nil {
 		return PurgeReport{}, nil, err
 	}
 	rep.Relations += n
-	if len(ids) > 0 {
-		n, err := exec(`DELETE FROM relations WHERE source_note_id IN (`+placeholders(len(ids))+`)`, int64Args(ids)...)
-		if err != nil {
-			return PurgeReport{}, nil, err
-		}
-		rep.Relations += n
-	}
 
-	// (3) Chuỗi note → embeddings → chunks (trigger chunks_ad dọn chunks_fts) → notes.
-	if len(ids) > 0 {
-		args := int64Args(ids)
-		ph := placeholders(len(ids))
-		if _, err := exec(`DELETE FROM embeddings WHERE chunk_id IN (SELECT id FROM chunks WHERE note_id IN (`+ph+`))`, args...); err != nil {
-			return PurgeReport{}, nil, err
-		}
-		if _, err := exec(`DELETE FROM chunks WHERE note_id IN (`+ph+`)`, args...); err != nil {
-			return PurgeReport{}, nil, err
-		}
-		if _, err := exec(`DELETE FROM notes WHERE id IN (`+ph+`)`, args...); err != nil {
-			return PurgeReport{}, nil, err
-		}
+	// (3) Chuỗi từng note: relations → embeddings → chunks (trigger dọn
+	// chunks_fts) → notes.
+	rel, _, err := deleteNotesChain(ctx, c, ids)
+	if err != nil {
+		return PurgeReport{}, nil, err
 	}
+	rep.Relations += rel
 
 	// (4) Episodes, tasks đã kết thúc, session_raw quá hạn giữ.
 	if rep.Episodes, err = exec(`DELETE FROM episodes WHERE at < ?`, evCut); err != nil {
@@ -196,6 +206,40 @@ func purgeTx(ctx context.Context, c purgeConn, now time.Time, ret Retention) (Pu
 		}
 	}
 	return rep, files, nil
+}
+
+// deleteNotesChain xoá chuỗi của các note: relations (source_note_id) →
+// embeddings → chunks (trigger chunks_ad dọn luôn chunks_fts) → notes.
+// Một nguồn duy nhất cho purge và HardDeleteNotes.
+func deleteNotesChain(ctx context.Context, c purgeConn, ids []int64) (relations, notes int, err error) {
+	if len(ids) == 0 {
+		return 0, 0, nil
+	}
+	args := int64Args(ids)
+	ph := placeholders(len(ids))
+	res, err := c.ExecContext(ctx, `DELETE FROM relations WHERE source_note_id IN (`+ph+`)`, args...)
+	if err != nil {
+		return 0, 0, err
+	}
+	n1, err := res.RowsAffected()
+	if err != nil {
+		return 0, 0, err
+	}
+	if _, err := c.ExecContext(ctx, `DELETE FROM embeddings WHERE chunk_id IN (SELECT id FROM chunks WHERE note_id IN (`+ph+`))`, args...); err != nil {
+		return 0, 0, err
+	}
+	if _, err := c.ExecContext(ctx, `DELETE FROM chunks WHERE note_id IN (`+ph+`)`, args...); err != nil {
+		return 0, 0, err
+	}
+	res, err = c.ExecContext(ctx, `DELETE FROM notes WHERE id IN (`+ph+`)`, args...)
+	if err != nil {
+		return 0, 0, err
+	}
+	n2, err := res.RowsAffected()
+	if err != nil {
+		return 0, 0, err
+	}
+	return int(n1), int(n2), nil
 }
 
 func int64Args(ids []int64) []any {

@@ -25,12 +25,11 @@ const (
 
 // RecallParams tham số tìm kiếm hybrid.
 type RecallParams struct {
-	Query             string
-	SpaceIDs          []int64
-	Tags              []string
-	Kinds             []string // rỗng = mọi kind
-	IncludeSuperseded bool     // false = ẩn decision/fact đã bị thay thế
-	Limit             int      // 0 → [recall].limit (mặc định 5)
+	Query    string
+	SpaceIDs []int64
+	Tags     []string
+	Kinds    []string // rỗng = mọi kind
+	Limit    int      // 0 → [recall].limit (mặc định 5)
 	// MinScore: nil → [recall].min_score; 0 = tắt ngưỡng.
 	MinScore *float64
 	// Project: lọc cứng (chỉ khi người dùng hỏi rõ một project); "" = mọi project.
@@ -49,11 +48,9 @@ type RecallHit struct {
 	UpdatedAt           time.Time
 	Tags                []string
 	Meta                store.NoteMeta // why/who/when/ref… để trích dẫn và đánh giá liên quan
-	Status              string         // active|superseded
-	SupersededBy        *int64
-	Project             string  // "" = chung
-	Text                string  // text của chunk khớp tốt nhất
-	Score               float64 // RRF, hoặc rerank score nếu rerank chạy
+	Project             string         // "" = chung
+	Text                string         // text của chunk khớp tốt nhất
+	Score               float64        // RRF, hoặc rerank score nếu rerank chạy
 }
 
 // RecallResult: Hits + trạng thái từng tầng — "ok:N" | "error: …" | "skipped: …".
@@ -148,7 +145,7 @@ func (b *Brain) Recall(ctx context.Context, p RecallParams) (RecallResult, error
 		stages["fts"] = "skipped: empty query tokens"
 	} else {
 		hits, err := b.st.SearchFTS(ctx, p.Query, store.NoteFilter{
-			SpaceIDs: allIDs, Tags: p.Tags, Kinds: p.Kinds, IncludeSuperseded: p.IncludeSuperseded, Project: p.Project}, ftsN)
+			SpaceIDs: allIDs, Tags: p.Tags, Kinds: p.Kinds, Project: p.Project}, ftsN)
 		if err != nil {
 			return RecallResult{}, err
 		}
@@ -185,7 +182,7 @@ func (b *Brain) Recall(ctx context.Context, p RecallParams) (RecallResult, error
 			continue
 		}
 		hits, err := b.VectorTop(ctx, model, store.NoteFilter{
-			SpaceIDs: g.spaceIDs, Tags: p.Tags, Kinds: p.Kinds, IncludeSuperseded: p.IncludeSuperseded, Project: p.Project}, qv[0], vecN)
+			SpaceIDs: g.spaceIDs, Tags: p.Tags, Kinds: p.Kinds, Project: p.Project}, qv[0], vecN)
 		if err != nil {
 			return RecallResult{}, err
 		}
@@ -367,21 +364,19 @@ func (b *Brain) Recall(ctx context.Context, p RecallParams) (RecallResult, error
 			return RecallResult{}, err
 		}
 		hits = append(hits, RecallHit{
-			NoteID:       n.ID,
-			ChunkID:      c.chunkID,
-			Kind:         n.Kind,
-			Space:        spaceName[n.SpaceID],
-			Source:       n.Source,
-			SessionID:    n.SessionID,
-			CreatedAt:    n.CreatedAt,
-			UpdatedAt:    n.UpdatedAt,
-			Tags:         n.Tags,
-			Meta:         n.Meta,
-			Status:       n.Status,
-			SupersededBy: n.SupersededBy,
-			Project:      n.Project,
-			Text:         c.text,
-			Score:        c.score,
+			NoteID:    n.ID,
+			ChunkID:   c.chunkID,
+			Kind:      n.Kind,
+			Space:     spaceName[n.SpaceID],
+			Source:    n.Source,
+			SessionID: n.SessionID,
+			CreatedAt: n.CreatedAt,
+			UpdatedAt: n.UpdatedAt,
+			Tags:      n.Tags,
+			Meta:      n.Meta,
+			Project:   n.Project,
+			Text:      c.text,
+			Score:     c.score,
 		})
 	}
 	return RecallResult{Hits: hits, Stages: stages}, nil

@@ -45,6 +45,9 @@ keep_originals = true
 watch_dirs = []
 [backup]
 keep = 7
+
+[consolidate]
+every_days = 30
 `
 
 func writeFile(t *testing.T, dir, name, content string, mode os.FileMode) string {
@@ -79,6 +82,9 @@ func TestMissingFileGivesDefaults(t *testing.T) {
 	}
 	if !cfg.Media.KeepOriginals || cfg.Backup.Keep != 7 || cfg.Briefing.TokenBudget != 1500 {
 		t.Fatalf("Media=%+v Backup=%+v Briefing=%+v", cfg.Media, cfg.Backup, cfg.Briefing)
+	}
+	if cfg.Consolidate.EveryDays != 7 {
+		t.Fatalf("Consolidate=%+v", cfg.Consolidate)
 	}
 	if w := strings.Join(cfg.Warnings(), "\n"); !strings.Contains(w, "chưa tồn tại") {
 		t.Fatalf("warnings=%q", w)
@@ -117,6 +123,9 @@ func TestFullTOMLParses(t *testing.T) {
 	}
 	if got := cfg.SpacePolicy("unknown"); got != "cloud" {
 		t.Fatalf("unknown policy=%q", got)
+	}
+	if cfg.Consolidate.EveryDays != 30 {
+		t.Fatalf("Consolidate=%+v", cfg.Consolidate)
 	}
 	if len(cfg.Warnings()) != 0 {
 		t.Fatalf("warnings=%q", cfg.Warnings())

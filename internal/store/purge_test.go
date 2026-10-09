@@ -59,6 +59,28 @@ func TestPurge(t *testing.T) {
 		knIDs = append(knIDs, id)
 	}
 
+	// --- (b2) legacy superseded (cơ chế cũ đã bỏ): kiến thức, mọi tuổi —
+	// purge quét sạch một lần + đếm riêng Superseded.
+	spID, _, err := s.UpsertNote(ctx, noteAt(1, "decision", "quyết định bị thay thế (legacy)", ago(10)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.InsertChunks(ctx, spID, []Chunk{{Ordinal: 0, Text: "quyết định bị thay thế (legacy)", TokenCount: 3}}); err != nil {
+		t.Fatal(err)
+	}
+	var spChunk int64
+	if err := s.DB().QueryRowContext(ctx, `SELECT id FROM chunks WHERE note_id=?`, spID).Scan(&spChunk); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB().ExecContext(ctx,
+		`INSERT INTO embeddings(chunk_id, model, dim, vec, created_at) VALUES(?,?,?,?,?)`,
+		spChunk, "test-model", 2, make([]byte, 8), ts(ago(10))); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB().ExecContext(ctx, `UPDATE notes SET status='superseded', superseded_by=? WHERE id=?`, knIDs[0], spID); err != nil {
+		t.Fatal(err)
+	}
+
 	// --- (c) sự kiện 364 ngày: giữ (chưa quá hạn)
 	cID, _, err := s.UpsertNote(ctx, noteAt(1, "note", "sự kiện 364 ngày", ago(364)))
 	if err != nil {
@@ -159,7 +181,7 @@ func TestPurge(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := PurgeReport{Events: 2, Episodes: 1, Relations: 2, Tasks: 1, Raws: 1, Jobs: 2, MediaRows: 3, MediaFiles: 1}
+	want := PurgeReport{Events: 2, Superseded: 1, Episodes: 1, Relations: 2, Tasks: 1, Raws: 1, Jobs: 2, MediaRows: 3, MediaFiles: 1}
 	if rep != want {
 		t.Fatalf("rep=%+v, muốn %+v", rep, want)
 	}
@@ -184,6 +206,9 @@ func TestPurge(t *testing.T) {
 	}
 	if _, err := s.FetchNote(ctx, fgID); err == nil {
 		t.Fatal("note forget quá ân hạn vẫn còn")
+	}
+	if _, err := s.FetchNote(ctx, spID); err == nil {
+		t.Fatal("note superseded legacy vẫn còn")
 	}
 	for _, id := range []int64{cID, dID} {
 		if _, err := s.FetchNote(ctx, id); err != nil {

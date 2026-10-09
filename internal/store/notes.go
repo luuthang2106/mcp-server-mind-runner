@@ -27,7 +27,8 @@ type Note struct {
 	DeletedAt   *time.Time
 	// Meta: trường có cấu trúc tuỳ loại (xem NoteMeta). Rỗng = không có.
 	Meta NoteMeta
-	// Status: active|superseded. SupersededBy: note thay thế (nếu có).
+	// Status/SupersededBy: legacy — cơ chế supersede đã bỏ (mọi thay thế xoá
+	// cứng); giữ cột để đọc row cũ tới khi purge (1b) quét sạch.
 	Status       string
 	SupersededBy *int64
 	// Project: nhãn tự động theo thư mục làm việc (tên gốc git); "" = chung.
@@ -91,12 +92,14 @@ func (s *Store) UpsertNote(ctx context.Context, n *Note) (int64, bool, error) {
 	var id int64
 	var fresh int
 	// Ghi lại: meta merge (trường mới ghi đè, trường cũ giữ), tags hợp nhất
-	// không trùng, và note đã bị thay thế KHÔNG tự hồi sinh status.
+	// không trùng, và row legacy status='superseded' được HỒI SINH về active —
+	// ghi lại y hệt không bao giờ làm mất nội dung (purge quét sạch legacy sau).
 	err := s.DB().QueryRowContext(ctx,
 		`INSERT INTO notes(space_id,kind,text,tags,source,session_id,content_hash,created_at,updated_at,meta,project)
 		 VALUES(?,?,?,?,?,?,?,?,?,?,?)
 		 ON CONFLICT(space_id, content_hash)
 		 DO UPDATE SET updated_at=excluded.updated_at, deleted_at=NULL,
+		   status='active', superseded_by=NULL,
 		   project=COALESCE(notes.project, excluded.project),
 		   meta=json_patch(notes.meta, excluded.meta),
 		   tags=(SELECT json_group_array(value) FROM (
@@ -224,32 +227,71 @@ func (s *Store) NotesByKind(ctx context.Context, spaceID int64, kind string, sin
 	return out, rows.Err()
 }
 
+// ActiveNotesByKinds: note chưa xoá mềm, status active, kind trong danh sách
+// của space; sắp theo id (thứ tự tất định cho batch LLM của consolidate).
+func (s *Store) ActiveNotesByKinds(ctx context.Context, spaceID int64, kinds []string) ([]Note, error) {
+	if len(kinds) == 0 {
+		return nil, nil
+	}
+	q := `SELECT ` + noteCols + ` FROM notes
+	      WHERE space_id=? AND deleted_at IS NULL AND status='active' AND kind IN (` + placeholders(len(kinds)) + `)
+	      ORDER BY id`
+	args := []any{spaceID}
+	for _, k := range kinds {
+		args = append(args, k)
+	}
+	rows, err := s.DB().QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Note
+	for rows.Next() {
+		n, err := scanNote(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, n)
+	}
+	return out, rows.Err()
+}
+
 // ErrNoteNotFound: note không tồn tại hoặc đã xoá mềm.
 var ErrNoteNotFound = errors.New("note không tồn tại hoặc đã bị xoá")
 
-// SupersedeNote đánh dấu oldID bị newID thay thế (status=superseded). Hai note
-// phải cùng space; oldID == newID bị từ chối. Idempotent.
-func (s *Store) SupersedeNote(ctx context.Context, oldID, newID int64, now time.Time) error {
-	if oldID == newID {
-		return errors.New("note không thể tự thay thế chính nó")
+// HardDeleteNotes xoá cứng cả chuỗi của các note (relations → embeddings →
+// chunks → notes; trigger dọn chunks_fts) trong MỘT transaction BEGIN
+// IMMEDIATE. Dùng khi thay thế ký ức (remember supersedes, dedupe lúc
+// extract, consolidate). Không có xoá mềm ở đây — phục hồi chỉ từ backup
+// ngày. Trả số note đã xoá; id không tồn tại → bỏ qua, không lỗi.
+func (s *Store) HardDeleteNotes(ctx context.Context, ids []int64) (int, error) {
+	if len(ids) == 0 {
+		return 0, nil
 	}
-	res, err := s.DB().ExecContext(ctx,
-		`UPDATE notes SET status='superseded', superseded_by=?, updated_at=?
-		 WHERE id=? AND deleted_at IS NULL
-		   AND space_id=(SELECT space_id FROM notes WHERE id=? AND deleted_at IS NULL)`,
-		newID, ts(now), oldID, newID)
+	conn, err := s.db.Conn(ctx)
 	if err != nil {
-		return err
+		return 0, err
 	}
-	n, err := res.RowsAffected()
+	defer conn.Close() // rollback defer đăng ký sau → chạy trước
+	if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+		return 0, err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_, _ = conn.ExecContext(context.Background(), "ROLLBACK")
+		}
+	}()
+	_, notes, err := deleteNotesChain(ctx, conn, ids)
 	if err != nil {
-		return err
+		return 0, err
 	}
-	if n == 0 {
-		return fmt.Errorf("supersede %d: %w (hoặc khác space với note mới)", oldID, ErrNoteNotFound)
+	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
+		return 0, err
 	}
+	committed = true
 	s.BumpGen()
-	return nil
+	return notes, nil
 }
 
 // NotesCreatedBetween: note (chưa xoá, mọi status) tạo trong [from, to) của

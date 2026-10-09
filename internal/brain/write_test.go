@@ -138,3 +138,23 @@ func TestWriteNoteChunksRedactPrivateKey(t *testing.T) {
 		t.Fatal("không có chunk")
 	}
 }
+
+// TestWriteNoteProcedureKind: procedure là kind hợp lệ (tầng kiến thức).
+func TestWriteNoteProcedureKind(t *testing.T) {
+	st := newStore(t)
+	b := New(st, nil, testCfg())
+	ctx := context.Background()
+	spaceID, err := st.SpaceByName(ctx, "personal")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := b.WriteNote(ctx, WriteParams{
+		SpaceID: spaceID, Kind: "procedure", Text: "Deploy mind-runner: make build rồi kéo .mcpb vào Claude Desktop.", Source: "tool:remember",
+	})
+	if err != nil || !res.Fresh {
+		t.Fatalf("res=%+v err=%v", res, err)
+	}
+	if !ValidKind("procedure") {
+		t.Fatal("ValidKind(procedure) phải true")
+	}
+}

@@ -62,7 +62,7 @@ type Extraction struct {
 // extractKinds: whitelist kind cho extract — hẹp hơn validKinds của brain
 // (transcript/caption chỉ do media ghi).
 var extractKinds = map[string]bool{
-	"fact": true, "preference": true, "decision": true, "note": true, "task_hint": true,
+	"fact": true, "preference": true, "decision": true, "note": true, "task_hint": true, "procedure": true,
 }
 
 // ParseExtraction đọc output model: lấy đoạn từ '{' đầu tới '}' cuối (bỏ fence

@@ -87,8 +87,8 @@ func TestWriteNoteProjectDefault(t *testing.T) {
 	}
 }
 
-// TestBriefingProjectFirst: việc của project đang mở lên đầu, việc project
-// khác có nhãn [project], việc chung không nhãn.
+// TestBriefingProjectFirst: "Việc đang mở" chỉ gồm project family của tiến
+// trình; việc project khác / không project chỉ còn dòng đếm.
 func TestBriefingProjectFirst(t *testing.T) {
 	st := newStore(t)
 	ctx := context.Background()
@@ -101,9 +101,9 @@ func TestBriefingProjectFirst(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	add("Sửa lỗi hoá đơn", "billing", now.Add(-1*time.Hour)) // mới nhất nhưng project khác
+	add("Sửa lỗi hoá đơn", "billing", now.Add(-1*time.Hour)) // project khác
 	add("Viết API đăng nhập", "api", now.Add(-48*time.Hour))
-	add("Mua quà sinh nhật", "", now.Add(-2*time.Hour))
+	add("Mua quà sinh nhật", "", now.Add(-2*time.Hour)) // không project cũng tính ngoài
 	b.SetProject("api")
 	br, err := b.Briefing(ctx, BriefingParams{SpaceID: sp, Now: now})
 	if err != nil {
@@ -113,10 +113,15 @@ func TestBriefingProjectFirst(t *testing.T) {
 	if !strings.Contains(txt, "# Briefing — 2026-10-06 — project api") {
 		t.Fatalf("header:\n%s", txt)
 	}
-	iAPI := strings.Index(txt, "Viết API đăng nhập\n")
-	iBill := strings.Index(txt, "Sửa lỗi hoá đơn [billing]")
-	iGift := strings.Index(txt, "Mua quà sinh nhật\n")
-	if iAPI < 0 || iBill < 0 || iGift < 0 || iAPI > iBill || iAPI > iGift {
-		t.Fatalf("thứ tự/nhãn sai:\n%s", txt)
+	if !strings.Contains(txt, "Viết API đăng nhập\n") {
+		t.Fatalf("việc của project phải hiện:\n%s", txt)
+	}
+	for _, no := range []string{"Sửa lỗi hoá đơn", "Mua quà sinh nhật"} {
+		if strings.Contains(txt, no) {
+			t.Fatalf("việc ngoài family không được hiện %q:\n%s", no, txt)
+		}
+	}
+	if !strings.Contains(txt, "còn 2 việc ngoài project hiện tại") {
+		t.Fatalf("thiếu dòng đếm:\n%s", txt)
 	}
 }

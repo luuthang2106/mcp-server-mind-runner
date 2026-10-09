@@ -25,7 +25,7 @@ func vecFor(text string) []float32 {
 	}
 }
 
-// TestRunSessionAccuracy: (1) quyết định gần trùng thay thế quyết định cũ,
+// TestRunSessionAccuracy: (1) quyết định gần trùng thay thế (xoá cứng) quyết định cũ,
 // (2) hai note y hệt trong một lần trích chỉ ghi một, (3) model thấy việc đang
 // mở và đóng đúng việc; id bịa bị bỏ, (4) việc trùng tiêu đề (khác dấu câu,
 // hoa/thường) không tạo mới.
@@ -69,9 +69,9 @@ func TestRunSessionAccuracy(t *testing.T) {
 	if !strings.Contains(input, "#"+itoa(quote)+": Gửi báo giá cho khách") || !strings.Contains(input, "Transcript:\nUser: chuyển sang Postgres") {
 		t.Fatalf("input thiếu danh sách việc đang mở:\n%s", input)
 	}
-	n, err := st.FetchNote(ctx, old.NoteID)
-	if err != nil || n.Status != "superseded" || n.SupersededBy == nil {
-		t.Fatalf("quyết định cũ phải bị thay thế: %+v err=%v", n, err)
+	// quyết định cũ bị xoá cứng (không còn trong DB)
+	if _, err := st.FetchNote(ctx, old.NoteID); err == nil {
+		t.Fatal("quyết định cũ phải bị xoá cứng")
 	}
 	var prefs, tasks int
 	st.DB().QueryRowContext(ctx, `SELECT count(*) FROM notes WHERE kind='preference'`).Scan(&prefs)

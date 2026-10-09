@@ -32,11 +32,11 @@ func New(st *store.Store, eg *egress.Egress, cfg *config.Config) *Brain {
 	return &Brain{st: st, eg: eg, cfg: cfg}
 }
 
-// validKinds: kind hợp lệ (chữ thường) — D13: fact/preference/decision/document
-// vĩnh viễn, note/task_hint/transcript/caption là sự kiện (purge theo retention).
+// validKinds: kind hợp lệ (chữ thường) — D13: fact/preference/decision/procedure/
+// document vĩnh viễn, note/task_hint/transcript/caption là sự kiện (purge theo retention).
 var validKinds = map[string]bool{
 	"note": true, "fact": true, "preference": true, "decision": true, "document": true,
-	"task_hint": true, "transcript": true, "caption": true,
+	"procedure": true, "task_hint": true, "transcript": true, "caption": true,
 }
 
 // ValidKind: kind có hợp lệ không (dùng để kiểm filter kinds của recall).

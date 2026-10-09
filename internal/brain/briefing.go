@@ -98,8 +98,9 @@ func (b *Brain) assembleBriefing(ctx context.Context, p BriefingParams) (string,
 		}
 	}
 
-	// Việc của project đang mở lên đầu; hạn/đang chờ lấy từ mọi project.
-	tasks, err := b.st.QueryTasks(ctx, p.SpaceID, store.TaskQuery{Status: "open", Prefer: b.project, Limit: 20})
+	// Việc mở của project hiện tại + family ("macallan" gồm "macallan-*");
+	// hạn/đang chờ lấy từ mọi project. b.project "" (Desktop cwd "/") → mọi project.
+	tasks, err := b.st.QueryTasks(ctx, p.SpaceID, store.TaskQuery{Status: "open", Family: b.project, Prefer: b.project, Limit: 20})
 	if err != nil {
 		return "", err
 	}
@@ -159,6 +160,11 @@ func (b *Brain) assembleBriefing(ctx context.Context, p BriefingParams) (string,
 	dueLines := taskLines(dueTasks)
 	waitLines := taskLines(waiting)
 	openLines := taskLines(tasks)
+	if b.project != "" {
+		if n, err := b.st.CountOpenOutsideFamily(ctx, p.SpaceID, b.project); err == nil && n > 0 {
+			openLines = append(openLines, fmt.Sprintf("- … còn %d việc ngoài project hiện tại (task_list để xem)", n))
+		}
+	}
 	seen := map[int64]bool{}
 	noteLines := func(ns []store.Note) []string {
 		var lines []string
@@ -198,7 +204,6 @@ func (b *Brain) assembleBriefing(ctx context.Context, p BriefingParams) (string,
 		return "", err
 	}
 	sections := []section{
-		{"Đã ghi kể từ recap trước (sai thì sửa/xoá theo #id)", capLines},
 		{"Quá hạn / sắp đến hạn", dueLines},
 		{"Đang chờ người khác", waitLines},
 		{"Việc đang mở", openLines},
@@ -207,6 +212,7 @@ func (b *Brain) assembleBriefing(ctx context.Context, p BriefingParams) (string,
 		{"Liên quan", relLines},
 		{"Phiên gần đây", epLines},
 		{"Notes mới", noteLines(notes)},
+		{"Đã ghi kể từ recap trước (sai thì sửa/xoá theo #id)", capLines},
 	}
 
 	// Render greedy: item chỉ vào nếu text+header(nếu chưa)+item lọt ngân sách;
@@ -291,7 +297,7 @@ func taskLine(t store.Task, today string, now time.Time, cur string) string {
 var capturedSources = []string{"hook:stop", "tool:remember"}
 
 // capturedMax: số dòng tối đa của mục "Đã ghi kể từ recap trước".
-const capturedMax = 12
+const capturedMax = 8
 
 // capturedWindow: [đầu ngày làm việc của lần briefing trước, đầu hôm nay).
 // Chưa từng briefing / briefing quá 7 ngày trước / đã briefing hôm nay (force)
@@ -322,6 +328,8 @@ func (b *Brain) capturedWindow(ctx context.Context, spaceID int64, now time.Time
 
 // capturedLines: note/việc được ghi tự động trong cửa sổ kể từ recap trước,
 // kèm #id để người dùng sửa nhanh ("mind fix: #12 …", "mind forget: #34").
+// Chỉ việc mới còn mở — việc sinh ra đã xong/bỏ hoặc đóng trong cửa sổ là
+// nhiễu, không đáng một dòng.
 func (b *Brain) capturedLines(ctx context.Context, spaceID int64, now time.Time) ([]string, error) {
 	from, to, err := b.capturedWindow(ctx, spaceID, now)
 	if err != nil {
@@ -335,33 +343,15 @@ func (b *Brain) capturedLines(ctx context.Context, spaceID int64, now time.Time)
 	if err != nil {
 		return nil, err
 	}
-	closed, err := b.st.TasksClosedBetween(ctx, spaceID, from, to, 100)
-	if err != nil {
-		return nil, err
-	}
 	var lines []string
 	for _, t := range created {
-		st := "việc mới"
-		switch t.Status {
-		case "done":
-			st = "việc mới, đã xong"
-		case "dropped":
-			st = "việc mới, đã bỏ"
+		if t.Status != "open" {
+			continue // việc sinh ra đã xong/bỏ: không đáng xuất hiện trong recap
 		}
-		lines = append(lines, fmt.Sprintf("- task #%d (%s): %s", t.ID, st, clipText(t.Title, 120))+projectTag(t.Project, b.project))
-	}
-	for _, t := range closed {
-		st := "đã xong"
-		if t.Status == "dropped" {
-			st = "đã bỏ"
-		}
-		lines = append(lines, fmt.Sprintf("- task #%d (%s): %s", t.ID, st, clipText(t.Title, 120))+projectTag(t.Project, b.project))
+		lines = append(lines, fmt.Sprintf("- task #%d (việc mới): %s", t.ID, clipText(t.Title, 120))+projectTag(t.Project, b.project))
 	}
 	for _, n := range notes {
 		line := fmt.Sprintf("- note #%d [%s]: %s", n.ID, n.Kind, clipText(n.Text, 120)) + projectTag(n.Project, b.project)
-		if n.Status == "superseded" && n.SupersededBy != nil {
-			line += fmt.Sprintf(" (đã bị #%d thay)", *n.SupersededBy)
-		}
 		lines = append(lines, line)
 	}
 	if len(lines) > capturedMax {
