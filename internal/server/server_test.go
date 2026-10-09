@@ -293,6 +293,9 @@ func TestTaskTools(t *testing.T) {
 	if a := names["task_list"].Annotations; a == nil || !a.ReadOnlyHint {
 		t.Fatalf("task_list phải readOnly: %+v", a)
 	}
+	if a := names["task_add"].Annotations; a == nil || !a.IdempotentHint {
+		t.Fatalf("task_add phải idempotent: %+v", a)
+	}
 
 	// add → list thấy
 	res, err := cs.CallTool(ctx, &mcp.CallToolParams{
@@ -495,7 +498,7 @@ func TestIngestTool(t *testing.T) {
 // TestForgetTool: forget note → recall/briefing không thấy; forget task →
 // task_list không thấy; lần 2 → forgotten=false có reason; id sai → structured
 // forgotten=false (không isError); kind lạ → isError; remember lại → hồi sinh;
-// annotation destructive.
+// annotation destructive; remember idempotent.
 func TestForgetTool(t *testing.T) {
 	st := newStore(t)
 	fake := egressfake.New(t, egressfake.Options{})
@@ -525,6 +528,9 @@ func TestForgetTool(t *testing.T) {
 			if a := tl.Annotations; a == nil || a.DestructiveHint == nil || !*a.DestructiveHint {
 				t.Fatalf("forget phải destructive: %+v", a)
 			}
+		}
+		if tl.Name == "remember" && (tl.Annotations == nil || !tl.Annotations.IdempotentHint) {
+			t.Fatalf("remember phải idempotent: %+v", tl.Annotations)
 		}
 	}
 	if !found {

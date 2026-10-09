@@ -57,8 +57,9 @@ func registerRemember(srv *mcp.Server, b *brain.Brain, st *store.Store, defSpace
 			"Call it proactively the moment it comes up — do not wait for the end of the conversation or for the user to say 'remember'. " +
 			"Fill only fields the user actually stated; never invent why/who/when. " +
 			"If it replaces an earlier decision or fact, recall first and pass its note_id as supersedes (the old note is permanently deleted). " +
-			"Do NOT use for: small talk, transient in-session details, things already in the code/repo, secrets/credentials, or concrete to-dos (use task_add). " +
+			"Do NOT use for: small talk, transient in-session details, things already in the code/repo, secret values (token, password, key — save the account and where its credential lives as kind=fact instead), or concrete to-dos (use task_add). " +
 			"Idempotent: saving identical text again only refreshes it (created=false).",
+		Annotations: &mcp.ToolAnnotations{IdempotentHint: true},
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in RememberIn) (*mcp.CallToolResult, RememberOut, error) {
 		kind := strings.ToLower(strings.TrimSpace(in.Kind))
 		if kind == "" {
@@ -244,6 +245,7 @@ func registerTaskAdd(srv *mcp.Server, b *brain.Brain, st *store.Store, defSpace 
 			"Capture due date, owner/waiting_on, why and next_step only when stated. " +
 			"Do NOT use for vague wishes (remember kind=task_hint) or steps you are about to do yourself in this session. " +
 			"An open task with the same title in the same project is reused and its empty fields filled (created=false).",
+		Annotations: &mcp.ToolAnnotations{IdempotentHint: true},
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in TaskAddIn) (*mcp.CallToolResult, TaskAddOut, error) {
 		title := strings.TrimSpace(in.Title)
 		if title == "" {

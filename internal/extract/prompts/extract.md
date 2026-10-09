@@ -19,7 +19,7 @@ A wrong or duplicate memory is worse than a missing one. When unsure, leave it o
 - `note` — something that happened (what was done or discussed), not knowledge. `who`/`when` when stated.
 - `task_hint` — an unfinished thing mentioned in passing that is not concrete enough to be a task.
 
-Each `text` is one self-contained sentence with enough context to be understood alone — no vague pronouns ("it", "that thing"). Skip small talk, repeats, transient details (one-off errors, intermediate attempts), things obvious from the code, and secrets (keys, passwords, tokens).
+Each `text` is one self-contained sentence with enough context to be understood alone — no vague pronouns ("it", "that thing"). Skip small talk, repeats, transient details (one-off errors, intermediate attempts), things obvious from the code, and secret values (keys, passwords, tokens). Account facts ARE worth extracting: which account/username is used for which service, and where the credential lives (Keychain item, vault, env).
 
 ## Never invent
 
