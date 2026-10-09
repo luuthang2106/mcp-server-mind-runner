@@ -92,6 +92,8 @@ Job cần cloud (embed/extract/omni) do MCP server xử lý (quét 5 phút/lần
          "MIND_RUNNER_MODEL_EXTRACT": "<model-chat>"}}
 ```
 
+4. Agent không nạp MCP instructions (hoặc cắt bớt): `mind-runner rules` ghi khối quy tắc vào file hướng dẫn chung của agent đã cài — Codex `~/.codex/AGENTS.md`, ZCode `~/.zcode/AGENTS.md`, Gemini CLI `~/.gemini/GEMINI.md`, opencode `~/.config/opencode/AGENTS.md`, Windsurf `~/.codeium/windsurf/memories/global_rules.md`. Khối nằm giữa `<!-- mind-runner:start/end -->`, chạy lại chỉ thay khối, phần bạn tự viết giữ nguyên; `--uninstall` gỡ. Cursor/Qoder: `mind-runner rules --print` rồi dán vào rules chung của app. Claude Code không cần (nhận đủ instructions).
+
 ## Recap đầu ngày
 
 Briefing (việc đang mở, quyết định, sở thích, phiên gần đây) được trả **1 lần mỗi ngày làm việc** (việc của project đang mở lên đầu):

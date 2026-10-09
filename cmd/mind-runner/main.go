@@ -29,6 +29,8 @@ func dispatch(args []string, stdout, stderr io.Writer) int {
 		return cli.RunMaintenance(args[1:], stdout, stderr, os.Getenv)
 	case "ingest":
 		return cli.RunIngest(args[1:], stdout, stderr, os.Getenv)
+	case "rules":
+		return cli.RunRules(args[1:], stdout, stderr, os.Getenv)
 	case "export":
 		return cli.RunExport(args[1:], stdout, stderr, os.Getenv)
 	case "version":
@@ -51,6 +53,7 @@ commands:
   ingest       nạp file (text/markdown/audio/ảnh/video)
   doctor       kiểm tra sức khoẻ
   status       trạng thái + dung lượng
+  rules        ghi khối quy tắc vào AGENTS.md/GEMINI.md của agent (--print, --uninstall)
   export       xuất Markdown
   version      in phiên bản
 `
