@@ -92,7 +92,8 @@ func RunRules(args []string, stdout, stderr io.Writer, env func(string) string) 
 			fmt.Fprintf(stdout, "ok: %s (%s) không đổi\n", t.name, path)
 			continue
 		}
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err == nil {
+		err = os.MkdirAll(filepath.Dir(path), 0o755)
+		if err == nil {
 			err = os.WriteFile(path, []byte(next), 0o644)
 		}
 		if err != nil {

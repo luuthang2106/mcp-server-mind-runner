@@ -13,6 +13,7 @@ func TestRulesInstallIdempotentUninstall(t *testing.T) {
 	os.MkdirAll(filepath.Join(home, ".codex"), 0o755)
 	agents := filepath.Join(home, ".codex", "AGENTS.md")
 	os.WriteFile(agents, []byte("# my rules\n"), 0o644)
+	os.MkdirAll(filepath.Join(home, ".config", "opencode"), 0o755) // agent có thư mục, chưa có file
 	env := func(k string) string {
 		if k == "HOME" {
 			return home
@@ -29,6 +30,9 @@ func TestRulesInstallIdempotentUninstall(t *testing.T) {
 	once := run()
 	if !strings.HasPrefix(once, "# my rules\n\n"+rulesStart) || !strings.Contains(once, "recall") {
 		t.Fatalf("install: %q", once)
+	}
+	if b, _ := os.ReadFile(filepath.Join(home, ".config", "opencode", "AGENTS.md")); string(b) != rulesBlock() {
+		t.Fatalf("new file: %q", b)
 	}
 	if twice := run(); twice != once {
 		t.Fatalf("not idempotent:\n%s", twice)
