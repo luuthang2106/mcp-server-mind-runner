@@ -889,4 +889,8 @@ func TestInstructionsSent(t *testing.T) {
 			t.Fatalf("instructions thiếu %q: %q", want, got)
 		}
 	}
+	// Claude Code cắt instructions ở ~2048 ký tự → giữ dưới 2000 byte.
+	if n := len(Instructions); n >= 2000 {
+		t.Fatalf("instructions dài %d byte, phải < 2000 (Claude Code cắt ở ~2048)", n)
+	}
 }

@@ -1,7 +1,7 @@
 // Package consolidate: job định kỳ quét note kiến thức (decision/fact/
 // preference/procedure) từng space, gom theo project rồi gửi từng batch cho
 // model tìm note trùng/lặp và gộp thành một note mới; note cũ bị XOÁ CỨNG.
-// Kết quả chỉ đi qua WriteNote + HardDeleteNotes (không đụng bảng khác).
+// Kết quả chỉ đi qua WriteNote + SoftDeleteNote (không đụng bảng khác).
 package consolidate
 
 import (
@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"mind-runner/internal/brain"
@@ -250,7 +251,19 @@ func (r *Runner) applyMerge(ctx context.Context, spaceID int64, proj string, m m
 	if len(old) == 0 {
 		return 0, nil
 	}
-	return r.st.HardDeleteNotes(ctx, old)
+	// xoá mềm: model gộp sai vẫn cứu được trong retention.jobs_days, sau đó
+	// purge xoá thật.
+	n := 0
+	for _, id := range old {
+		ok, err := r.st.SoftDeleteNote(ctx, id, time.Now())
+		if err != nil {
+			return n, err
+		}
+		if ok {
+			n++
+		}
+	}
+	return n, nil
 }
 
 // projectsOf: danh sách project có note, sắp tất định. Batch không trộn hai

@@ -67,11 +67,11 @@ func TestRunMerges(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := st.FetchNote(ctx, a); err == nil {
-		t.Fatal("note cũ a chưa bị xoá")
+	if n, err := st.FetchNote(ctx, a); err != nil || n.DeletedAt == nil {
+		t.Fatalf("note cũ a phải bị xoá mềm: %+v err=%v", n, err)
 	}
-	if _, err := st.FetchNote(ctx, b); err == nil {
-		t.Fatal("note cũ b chưa bị xoá")
+	if n, err := st.FetchNote(ctx, b); err != nil || n.DeletedAt == nil {
+		t.Fatalf("note cũ b phải bị xoá mềm: %+v err=%v", n, err)
 	}
 	facts, err := st.ActiveNotesByKinds(ctx, 1, []string{"fact"})
 	if err != nil || len(facts) != 1 {

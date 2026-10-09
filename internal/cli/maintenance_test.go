@@ -394,11 +394,11 @@ func TestMaintenanceConsolidationCycle(t *testing.T) {
 	}
 	defer st.Close()
 	ctx := context.Background()
-	if _, err := st.FetchNote(ctx, a); err == nil {
-		t.Fatal("note cũ a chưa bị xoá")
+	if n, err := st.FetchNote(ctx, a); err != nil || n.DeletedAt == nil {
+		t.Fatalf("note cũ a phải bị xoá mềm: %+v err=%v", n, err)
 	}
-	if _, err := st.FetchNote(ctx, b); err == nil {
-		t.Fatal("note cũ b chưa bị xoá")
+	if n, err := st.FetchNote(ctx, b); err != nil || n.DeletedAt == nil {
+		t.Fatalf("note cũ b phải bị xoá mềm: %+v err=%v", n, err)
 	}
 	var n int
 	if err := st.DB().QueryRowContext(ctx,

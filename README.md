@@ -46,7 +46,7 @@ Mỗi note giữ `text` là một câu tự nhiên; các trường phụ nằm t
 
 | kind | trường |
 |---|---|
-| `decision` | `why`, `alternatives`, `who`, `when`; `supersedes` xoá cứng quyết định cũ (phục hồi chỉ từ backup) |
+| `decision` | `why`, `alternatives`, `who`, `when`; `supersedes` xoá mềm quyết định cũ (ẩn khỏi recall; purge xoá thật sau `retention.jobs_days`) |
 | `fact` | `ref` (nguồn), `as_of`, `who` |
 | `preference` | `scope`, `why` |
 | `procedure` | cách làm lặp lại (quy trình/các bước); không có trường phụ |

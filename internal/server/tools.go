@@ -37,7 +37,7 @@ type RememberIn struct {
 	Ref  string   `json:"ref,omitempty" jsonschema:"Source: URL, file path, document/meeting name, ticket id"`
 	// decision
 	Alternatives []string `json:"alternatives,omitempty" jsonschema:"Decision only: options considered and rejected"`
-	Supersedes   int64    `json:"supersedes,omitempty" jsonschema:"note_id of an earlier decision/fact this one replaces (from recall); the old one is permanently deleted (recovery only via backups)"`
+	Supersedes   int64    `json:"supersedes,omitempty" jsonschema:"note_id of an earlier decision/fact this one replaces (from recall); the old one is hidden from recall (soft delete)"`
 	// preference
 	Scope string `json:"scope,omitempty" jsonschema:"Preference only: where it applies, e.g. 'code reviews', 'emails to clients'"`
 }
@@ -56,8 +56,9 @@ func registerRemember(srv *mcp.Server, b *brain.Brain, st *store.Store, defSpace
 		Description: "Save something the user will want later: a decision (and why), a fact about their projects/people/setup, a preference, or a notable event. " +
 			"Call it proactively the moment it comes up — do not wait for the end of the conversation or for the user to say 'remember'. " +
 			"Fill only fields the user actually stated; never invent why/who/when. " +
-			"If it replaces an earlier decision or fact, recall first and pass its note_id as supersedes (the old note is permanently deleted). " +
+			"If it replaces an earlier decision or fact, recall first and pass its note_id as supersedes (the old note is hidden from recall). " +
 			"Do NOT use for: small talk, transient in-session details, things already in the code/repo, secret values (token, password, key — save the account and where its credential lives as kind=fact instead), or concrete to-dos (use task_add). " +
+			"Accounts are worth a fact: which account for which service/project, where its credential lives (Keychain item, 1Password, env var), expiry. To keep a secret, offer Keychain (security add-generic-password -s <service> -a <account> -w — typed at its prompt, never pasted into chat); never echo a secret value. " +
 			"Idempotent: saving identical text again only refreshes it (created=false).",
 		Annotations: &mcp.ToolAnnotations{IdempotentHint: true},
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in RememberIn) (*mcp.CallToolResult, RememberOut, error) {
@@ -110,7 +111,9 @@ func registerRemember(srv *mcp.Server, b *brain.Brain, st *store.Store, defSpace
 		}
 		out := RememberOut{NoteID: res.NoteID, Created: res.Fresh}
 		if in.Supersedes != 0 && in.Supersedes != res.NoteID {
-			if _, err := st.HardDeleteNotes(ctx, []int64{in.Supersedes}); err != nil {
+			// xoá mềm: ẩn khỏi recall ngay, purge xoá thật sau retention.jobs_days
+			// — chọn nhầm id vẫn cứu được (ghi lại đúng nội dung cũ là hồi sinh).
+			if _, err := st.SoftDeleteNote(ctx, in.Supersedes, time.Now()); err != nil {
 				return nil, RememberOut{}, err
 			}
 			out.Superseded = in.Supersedes
@@ -627,7 +630,7 @@ func registerForget(srv *mcp.Server, st *store.Store) {
 		Name: "forget",
 		Description: "Forget a note or task (soft delete — disappears from recall/briefing immediately). " +
 			"Use only when the user asks to forget/delete something: recall or task_list first, show what will be removed and confirm before calling. " +
-			"For a decision that merely changed, use remember with supersedes instead — the old note is permanently deleted.",
+			"For a decision that merely changed, use remember with supersedes instead (the old note is hidden from recall).",
 		Annotations: &mcp.ToolAnnotations{DestructiveHint: boolPtr(true)},
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in ForgetIn) (*mcp.CallToolResult, ForgetOut, error) {
 		now := time.Now()
